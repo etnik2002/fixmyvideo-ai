@@ -44,6 +44,7 @@ userSchema.pre('save', async function (next) {
 
 // Method to check password validity
 userSchema.methods.matchPassword = async function (enteredPassword) {
+  console.log({ this: this.password, enteredPassword })
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

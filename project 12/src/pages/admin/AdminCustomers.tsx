@@ -29,11 +29,11 @@ const AdminCustomers: React.FC = () => {
     const fetchCustomers = async () => {
       setLoading(true);
       setError(null);
-      
+
       try {
         // Fetch customers from API endpoint
-        const response = await apiClient.get('/admin/users'); // Use API call
-        
+        const response = await apiClient.get('/dashboard/users'); // Use API call
+
         const customersData = response.data.map((user: any) => ({ // Map API response
           id: user._id || user.id, // Adjust based on API response field name
           uid: user.uid || user._id || user.id, // Use uid or fallback
@@ -41,17 +41,17 @@ const AdminCustomers: React.FC = () => {
           email: user.email || 'Keine E-Mail',
           phone: user.phone || 'Nicht angegeben',
           // Combine address fields if they come separately from the API
-          address: user.address 
-            ? `${user.address}, ${user.zipCode || ''} ${user.city || ''}, ${user.country || ''}` 
+          address: user.address
+            ? `${user.address}, ${user.zipCode || ''} ${user.city || ''}, ${user.country || ''}`
             : 'Nicht angegeben',
-          createdAt: user.createdAt 
+          createdAt: user.createdAt
             ? new Date(user.createdAt).toLocaleDateString('de-DE') // Format date string
             : 'Unbekannt',
           timestamp: user.createdAt || new Date().toISOString(), // Store date string
           orderCount: user.orderCount || 0, // Assume API provides this
           totalSpent: user.totalSpent || 0    // Assume API provides this
         }));
-          
+
         setCustomers(customersData);
 
       } catch (err: any) {
@@ -63,23 +63,23 @@ const AdminCustomers: React.FC = () => {
         setLoading(false);
       }
     };
-    
+
     fetchCustomers();
   }, []);
 
   // Filter customers based on search term and status
   const filteredCustomers = customers.filter(customer => { // Use customers directly
-    const matchesSearch = 
+    const matchesSearch =
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.address.toLowerCase().includes(searchTerm.toLowerCase());
-      
-    const matchesStatus = 
-      statusFilter === 'all' || 
+
+    const matchesStatus =
+      statusFilter === 'all' ||
       (statusFilter === 'active' && customer.orderCount > 0) ||
       (statusFilter === 'inactive' && customer.orderCount === 0);
-      
+
     return matchesSearch && matchesStatus;
   });
 
@@ -94,7 +94,7 @@ const AdminCustomers: React.FC = () => {
         <h1 className="text-2xl font-medium text-fmv-silk mb-2">Kundenverwaltung</h1>
         <p className="text-fmv-silk/70">Übersicht aller Kunden und deren Bestellungen.</p>
       </div>
-      
+
       {/* Error Message */}
       {error && (
         <div className="bg-red-900/20 border border-red-900/30 rounded-lg p-4 text-red-400">
@@ -104,10 +104,10 @@ const AdminCustomers: React.FC = () => {
           </div>
         </div>
       )}
-      
+
       {/* Summary Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <motion.div 
+        <motion.div
           whileHover={{ y: -5 }}
           className="bg-fmv-carbon-darker p-6 rounded-lg shadow-md border border-fmv-carbon-light/20"
         >
@@ -121,8 +121,8 @@ const AdminCustomers: React.FC = () => {
             </div>
           </div>
         </motion.div>
-        
-        <motion.div 
+
+        <motion.div
           whileHover={{ y: -5 }}
           className="bg-fmv-carbon-darker p-6 rounded-lg shadow-md border border-fmv-carbon-light/20"
         >
@@ -138,8 +138,8 @@ const AdminCustomers: React.FC = () => {
             </div>
           </div>
         </motion.div>
-        
-        <motion.div 
+
+        <motion.div
           whileHover={{ y: -5 }}
           className="bg-fmv-carbon-darker p-6 rounded-lg shadow-md border border-fmv-carbon-light/20"
         >
@@ -160,7 +160,7 @@ const AdminCustomers: React.FC = () => {
           </div>
         </motion.div>
       </div>
-      
+
       {/* Filters and Search */}
       <div className="bg-fmv-carbon-darker p-4 rounded-lg shadow-md border border-fmv-carbon-light/20">
         <div className="flex flex-col sm:flex-row gap-4">
@@ -176,7 +176,7 @@ const AdminCustomers: React.FC = () => {
               className="pl-10 pr-4 py-2 w-full rounded-md bg-fmv-carbon-light/10 border border-fmv-carbon-light/30 text-fmv-silk focus:outline-none focus:ring-1 focus:ring-fmv-orange/50"
             />
           </div>
-          
+
           <div className="relative sm:w-48">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Filter className="h-5 w-5 text-gray-400" />
@@ -193,7 +193,7 @@ const AdminCustomers: React.FC = () => {
           </div>
         </div>
       </div>
-      
+
       {/* Customers Table */}
       <div className="bg-fmv-carbon-darker rounded-lg shadow-md border border-fmv-carbon-light/30 overflow-hidden">
         {loading ? (
@@ -289,7 +289,7 @@ const AdminCustomers: React.FC = () => {
             <h3 className="text-lg font-medium text-fmv-silk mb-2">Keine Kunden gefunden</h3>
             <p className="text-fmv-silk/70 mb-4">
               {searchTerm || statusFilter !== 'all'
-                ? 'Keine Kunden entsprechen Ihren Filterkriterien.' 
+                ? 'Keine Kunden entsprechen Ihren Filterkriterien.'
                 : 'Es sind noch keine Kunden vorhanden.'}
             </p>
           </div>

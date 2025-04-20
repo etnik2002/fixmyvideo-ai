@@ -4,6 +4,7 @@ import asyncHandler from 'express-async-handler';
 import User from '../models/User.js';
 import { protect } from '../middleware/authMiddleware.js';
 import dotenv from 'dotenv';
+import bcryptjs from 'bcryptjs';
 
 dotenv.config({ path: '../.env' });
 
@@ -63,15 +64,14 @@ router.post('/login', asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
-      res.status(400);
-      throw new Error('Please provide email and password');
+    res.status(400);
+    throw new Error('Please provide email and password');
   }
 
   // Check for user by email and include password in the result
   const user = await User.findOne({ email }).select('+password');
-
   // Check if user exists and password matches
-  if (user && (await user.matchPassword(password))) {
+  if (user && (await bcryptjs.compare(password, user.password))) {
     res.json({
       _id: user._id,
       name: user.name,

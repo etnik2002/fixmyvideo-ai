@@ -1,5 +1,5 @@
 import express from 'express';
-import { getAdminDashboardData , getAdminDashboardOrders} from '../controllers/dashboardController.js';
+import { getAdminDashboardData, getAdminDashboardOrders, getUsers } from '../controllers/dashboardController.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -9,5 +9,7 @@ const router = express.Router();
 // @access  Private/Admin
 router.get('/admin', protect, admin, getAdminDashboardData);
 router.get('/admin/orders', protect, admin, getAdminDashboardOrders);
+router.get('/users', protect, admin, getUsers);
+
 
 export default router; 

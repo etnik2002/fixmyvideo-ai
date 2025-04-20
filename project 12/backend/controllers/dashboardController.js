@@ -16,46 +16,46 @@ const getAdminDashboardData = asyncHandler(async (req, res) => {
   // --- Revenue Stats ---
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  
+
   const revenueStatsPromise = Order.aggregate([
     {
-        $group: {
-            _id: null, // Group all documents together
-            totalRevenue: { $sum: "$totalAmount" }, // Sum the totalAmount field
-        }
+      $group: {
+        _id: null, // Group all documents together
+        totalRevenue: { $sum: "$totalAmount" }, // Sum the totalAmount field
+      }
     },
-     {
-         $lookup: { // Perform a lookup to calculate monthly revenue in the same pipeline (more efficient)
-             from: "orders", // The collection to join
-             pipeline: [
-                 { 
-                     $match: { 
-                         createdAt: { $gte: firstDayOfMonth } // Filter orders created this month
-                     } 
-                 },
-                 { 
-                     $group: { 
-                         _id: null, 
-                         monthlyRevenue: { $sum: "$totalAmount" } 
-                     } 
-                 }
-             ],
-             as: "monthlyData" // Output array field name
-         }
-     },
-     {
-         $unwind: { // Deconstruct the monthlyData array (it will have 0 or 1 element)
-             path: "$monthlyData",
-             preserveNullAndEmptyArrays: true // Keep the document even if no orders this month
-         }
-     },
-     {
-         $project: { // Select and reshape the output
-             _id: 0, // Exclude the default _id
-             totalRevenue: 1,
-             monthlyRevenue: { $ifNull: ["$monthlyData.monthlyRevenue", 0] } // Default to 0 if no monthly data
-         }
-     }
+    {
+      $lookup: { // Perform a lookup to calculate monthly revenue in the same pipeline (more efficient)
+        from: "orders", // The collection to join
+        pipeline: [
+          {
+            $match: {
+              createdAt: { $gte: firstDayOfMonth } // Filter orders created this month
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              monthlyRevenue: { $sum: "$totalAmount" }
+            }
+          }
+        ],
+        as: "monthlyData" // Output array field name
+      }
+    },
+    {
+      $unwind: { // Deconstruct the monthlyData array (it will have 0 or 1 element)
+        path: "$monthlyData",
+        preserveNullAndEmptyArrays: true // Keep the document even if no orders this month
+      }
+    },
+    {
+      $project: { // Select and reshape the output
+        _id: 0, // Exclude the default _id
+        totalRevenue: 1,
+        monthlyRevenue: { $ifNull: ["$monthlyData.monthlyRevenue", 0] } // Default to 0 if no monthly data
+      }
+    }
   ]);
 
   // --- User Counts ---
@@ -92,7 +92,7 @@ const getAdminDashboardData = asyncHandler(async (req, res) => {
       newUsersPromise,
       recentOrdersPromise
     ]);
-    
+
     // Extract revenue results (aggregation returns an array)
     const revenueStats = revenueResults[0] || { totalRevenue: 0, monthlyRevenue: 0 };
     const averageOrderValue = totalOrders > 0 ? revenueStats.totalRevenue / totalOrders : 0;
@@ -105,9 +105,9 @@ const getAdminDashboardData = asyncHandler(async (req, res) => {
         completed: completedOrders,
       },
       revenueStats: {
-         totalRevenue: revenueStats.totalRevenue,
-         monthlyRevenue: revenueStats.monthlyRevenue,
-         averageOrderValue: averageOrderValue,
+        totalRevenue: revenueStats.totalRevenue,
+        monthlyRevenue: revenueStats.monthlyRevenue,
+        averageOrderValue: averageOrderValue,
       },
       userStats: {
         totalUsers: totalUsers,
@@ -117,19 +117,28 @@ const getAdminDashboardData = asyncHandler(async (req, res) => {
     });
 
   } catch (error) {
-      console.error("Error fetching admin dashboard data:", error);
-      res.status(500);
-      throw new Error('Server error fetching dashboard data');
+    console.error("Error fetching admin dashboard data:", error);
+    res.status(500);
+    throw new Error('Server error fetching dashboard data');
   }
 });
 const getAdminDashboardOrders = asyncHandler(async (req, res) => {
   try {
-    return res.json({data: await Order.find({}).select("-uploadedImages")})
+    return res.json({ data: await Order.find({}).select("-uploadedImages") })
   } catch (error) {
-      console.error("Error fetching admin dashboard data:", error);
-      res.status(500);
-      throw new Error('Server error fetching dashboard data');
+    console.error("Error fetching admin dashboard data:", error);
+    res.status(500);
+    throw new Error('Server error fetching dashboard data');
+  }
+});
+const getUsers = asyncHandler(async (req, res) => {
+  try {
+    return res.json({ data: await User.find({}) })
+  } catch (error) {
+    console.error("Error fetching admin dashboard data:", error);
+    res.status(500);
+    throw new Error('Server error fetching dashboard data');
   }
 });
 
-export { getAdminDashboardData, getAdminDashboardOrders }; 
+export { getAdminDashboardData, getAdminDashboardOrders, getUsers }; 
