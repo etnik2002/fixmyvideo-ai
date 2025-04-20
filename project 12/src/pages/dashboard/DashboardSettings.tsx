@@ -1,24 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
-import { useAuth } from '../../contexts/AuthContext';
+import { apiClient, useAuth } from '../../contexts/AuthContext';
 import { User, Mail, Lock, Shield, AlertTriangle, CreditCard } from 'lucide-react';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { db } from '../../firebase';
 import { motion } from 'framer-motion';
   
 const DashboardSettings: React.FC = () => {
-  const { userData, updateUserProfile, currentUser, updateUserPassword } = useAuth();
+  const { currentUser } = useAuth();
   
   // Profile state
   const [profileFormData, setProfileFormData] = useState({
-    displayName: userData?.displayName || '',
-    email: userData?.email || '',
-    company: userData?.company || '',
-    phone: userData?.phone || '',
-    address: userData?.address || '',
-    city: userData?.city || '',
-    zipCode: userData?.zipCode || '',
-    country: userData?.country || '',
+    displayName: currentUser?.name || '',
+    email: currentUser?.email || '',
+    company: '',
+    phone: '',
+    address: '',
+    city: '',
+    zipCode: '',
+    country: '',
   });
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState(false);
@@ -43,17 +41,10 @@ const DashboardSettings: React.FC = () => {
       try {
         if (!currentUser) return;
         
-        // Fetch subscription from Firestore
-        const subscriptionsRef = collection(db, 'subscriptions');
-        const q = query(
-          subscriptionsRef,
-          where('userId', '==', currentUser.uid),
-          limit(1)
-        );
-        
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          setSubscription(querySnapshot.docs[0].data());
+        // Fetch subscription from API
+        const response = await apiClient.get(`/subscriptions/user/${currentUser._id}`);
+        if (response.data) {
+          setSubscription(response.data);
         }
       } catch (error) {
         console.error('Error fetching subscription:', error);
@@ -81,41 +72,20 @@ const DashboardSettings: React.FC = () => {
     setProfileSuccess(false);
     
     try {
-      // Update only the fields that have changed
-      const updatedFields: any = {};
-      
-      if (profileFormData.displayName !== userData?.displayName) {
-        updatedFields.displayName = profileFormData.displayName;
-      }
-      
-      if (profileFormData.company !== userData?.company) {
-        updatedFields.company = profileFormData.company;
-      }
-      
-      if (profileFormData.phone !== userData?.phone) {
-        updatedFields.phone = profileFormData.phone;
-      }
-      
-      if (profileFormData.address !== userData?.address) {
-        updatedFields.address = profileFormData.address;
-      }
-      
-      if (profileFormData.city !== userData?.city) {
-        updatedFields.city = profileFormData.city;
-      }
-      
-      if (profileFormData.zipCode !== userData?.zipCode) {
-        updatedFields.zipCode = profileFormData.zipCode;
-      }
-      
-      if (profileFormData.country !== userData?.country) {
-        updatedFields.country = profileFormData.country;
-      }
-      
-      if (Object.keys(updatedFields).length > 0) {
-        await updateUserProfile(updatedFields);
-        setProfileSuccess(true);
-      }
+      // TODO: Implement profile update logic once updateUserProfile is available in AuthContext
+      console.warn("Profile update logic not yet implemented in AuthContext");
+      // const updatedFields: any = {};
+      // // Adjust field comparisons based on actual UserData structure
+      // if (profileFormData.displayName !== currentUser?.name) {
+      //   updatedFields.name = profileFormData.displayName; // Assuming backend expects 'name'
+      // }
+      // // ... add other fields if needed and available ...
+
+      // if (Object.keys(updatedFields).length > 0) {
+      //   // await updateUserProfile(updatedFields); // Uncomment when available
+      //   setProfileSuccess(true);
+      // }
+       setProfileSuccess(false); // Keep false until implemented
     } catch (error) {
       console.error('Failed to update profile:', error);
     } finally {
@@ -165,8 +135,10 @@ const DashboardSettings: React.FC = () => {
     setPasswordSuccess(false);
     
     try {
-      await updateUserPassword(passwordData.currentPassword, passwordData.newPassword);
-      
+      // TODO: Implement password update logic once updateUserPassword is available in AuthContext
+      console.warn("Password update logic not yet implemented in AuthContext");
+      // await updateUserPassword(passwordData.currentPassword, passwordData.newPassword); // Uncomment when available
+
       // Reset form
       setPasswordData({
         currentPassword: '',
@@ -174,9 +146,10 @@ const DashboardSettings: React.FC = () => {
         confirmPassword: '',
       });
       
-      setPasswordSuccess(true);
+      setPasswordSuccess(false); // Set to true when implemented and successful
     } catch (error) {
       console.error('Failed to update password:', error);
+       setPasswordError('Fehler beim Aktualisieren des Passworts.'); // Provide feedback
     } finally {
       setIsUpdatingPassword(false);
     }

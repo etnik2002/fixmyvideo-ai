@@ -1,20 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy, where, Timestamp } from 'firebase/firestore';
-import { db } from '../../firebase';
+// Removed Firebase imports
+// import { collection, query, getDocs, orderBy, where, Timestamp } from 'firebase/firestore';
+// import { db } from '../../firebase';
 import { CreditCard, DollarSign, Calendar, AlertTriangle, CheckCircle, XCircle, Search, Filter, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { apiClient } from '../../lib/apiClient'; // Import apiClient
 
 interface Payment {
-  id: string;
+  id: string; // Use id or _id based on API response
   orderId: string;
   userId: string;
+  total: number;
   amount: number;
   status: string;
   date: string;
-  timestamp: Date;
+  timestamp: string; // Expect string date from API
   paymentMethod: string;
   customerName: string;
   customerEmail: string;
+  paymentStatus: string;
 }
 
 const AdminPayments: React.FC = () => {
@@ -24,7 +28,7 @@ const AdminPayments: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
-  const [userDetails, setUserDetails] = useState<Record<string, any>>({});
+  // User details will be mapped from the API response directly
 
   useEffect(() => {
     const fetchPayments = async () => {
@@ -32,77 +36,32 @@ const AdminPayments: React.FC = () => {
       setError(null);
       
       try {
-        // Since we don't have a dedicated payments collection, we'll use orders
-        const ordersRef = collection(db, 'orders');
-        const ordersQuery = query(ordersRef, orderBy('createdAt', 'desc'));
-        
-        try {
-          const querySnapshot = await getDocs(ordersQuery);
-          const ordersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
+        // Fetch orders (as payments) from API endpoint
+        const response = await apiClient.get('/dashboard/admin/orders'); // Use API call
+        console.log({response})
+        const paymentsData = response.data.map((order: any) => ({ // Map API response
+          id: order._id || order.id, // Adjust based on API response field name
+          orderId: order.orderId || order._id || order.id,
+          userId: order.userId || 'Unbekannt',
+          amount: order.total || 0,
+          status: order.paymentStatus || (order.status === 'Storniert' ? 'failed' : 'succeeded'),
+          date: order.createdAt 
+            ? new Date(order.createdAt).toLocaleDateString('de-DE') // Format date string
+            : new Date().toLocaleDateString('de-DE'),
+          timestamp: order.createdAt || new Date().toISOString(), // Store date string
+          paymentMethod: order.paymentMethod || 'card',
+          // Assume user details are nested or flattened in the order object from API
+          customerName: order.user?.displayName || order.customerName || 'Unbekannt', 
+          customerEmail: order.user?.email || order.customerEmail || 'Keine E-Mail'
+        }));
           
-          // Fetch user details for each order
-          const userIds = [...new Set(ordersData.map(order => order.userId))];
-          const usersRef = collection(db, 'users');
-          
-          const userDetailsObj: Record<string, any> = {};
-          
-          for (const userId of userIds) {
-            if (userId === 'guest') {
-              userDetailsObj[userId] = { displayName: 'Gast', email: 'guest@example.com' };
-              continue;
-            }
-            
-            try {
-              const userQuery = query(usersRef, where('uid', '==', userId));
-              const userSnapshot = await getDocs(userQuery);
-              
-              if (!userSnapshot.empty) {
-                const userData = userSnapshot.docs[0].data();
-                userDetailsObj[userId] = {
-                  displayName: userData.displayName || 'Unbekannt',
-                  email: userData.email || 'Keine E-Mail'
-                };
-              } else {
-                userDetailsObj[userId] = { displayName: 'Unbekannt', email: 'Nicht gefunden' };
-              }
-            } catch (userError) {
-              console.error(`Error fetching user ${userId}:`, userError);
-              userDetailsObj[userId] = { displayName: 'Fehler', email: 'Fehler beim Laden' };
-            }
-          }
-          
-          setUserDetails(userDetailsObj);
-          
-          // Convert orders to payments
-          const paymentsData = ordersData.map(order => ({
-            id: order.id,
-            orderId: order.orderId || order.id,
-            userId: order.userId || 'Unbekannt',
-            amount: order.total || 0,
-            status: order.paymentStatus || (order.status === 'Storniert' ? 'failed' : 'succeeded'),
-            date: order.createdAt instanceof Timestamp 
-              ? new Date(order.createdAt.toDate()).toLocaleDateString('de-DE')
-              : new Date().toLocaleDateString('de-DE'),
-            timestamp: order.createdAt instanceof Timestamp 
-              ? order.createdAt.toDate()
-              : new Date(),
-            paymentMethod: order.paymentMethod || 'card',
-            customerName: userDetailsObj[order.userId]?.displayName || 'Unbekannt',
-            customerEmail: userDetailsObj[order.userId]?.email || 'Keine E-Mail'
-          }));
-          
-          setPayments(paymentsData);
-        } catch (fetchError) {
-          console.error('Error fetching payments:', fetchError);
-          setError('Fehler beim Laden der Zahlungen. Bitte versuchen Sie es später erneut.');
-          setPayments([]);
-        }
-      } catch (error) {
-        console.error('Error fetching payments:', error);
-        setError('Fehler beim Laden der Zahlungen. Bitte versuchen Sie es später erneut.');
+        setPayments(paymentsData);
+
+      } catch (err: any) {
+        console.error('Error fetching payments:', err);
+        const message = err.response?.data?.message || err.message || 'Fehler beim Laden der Zahlungen.';
+        setError(message);
+        setPayments([]);
       } finally {
         setLoading(false);
       }
@@ -122,32 +81,36 @@ const AdminPayments: React.FC = () => {
       statusFilter === 'all' || 
       payment.status.toLowerCase() === statusFilter.toLowerCase();
       
-    // Date filtering
+    // Date filtering - comparing string dates, might need adjustment if API format differs
     let matchesDate = true;
     const now = new Date();
-    
+    const paymentDate = new Date(payment.timestamp); // Parse the timestamp string
+
     if (dateFilter === 'today') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      matchesDate = payment.timestamp >= today;
+      matchesDate = paymentDate >= today;
     } else if (dateFilter === 'week') {
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
-      matchesDate = payment.timestamp >= weekAgo;
+      matchesDate = paymentDate >= weekAgo;
     } else if (dateFilter === 'month') {
       const monthAgo = new Date();
       monthAgo.setMonth(monthAgo.getMonth() - 1);
-      matchesDate = payment.timestamp >= monthAgo;
+      matchesDate = paymentDate >= monthAgo;
     }
       
     return matchesSearch && matchesStatus && matchesDate;
   });
 
-  // Calculate total revenue from filtered payments
-  const totalRevenue = filteredPayments.reduce((sum, payment) => {
-    return sum + (payment.status === 'succeeded' ? payment.amount : 0);
-  }, 0);
 
+
+  let totalRevenue = 0;
+  filteredPayments.forEach((p) => {
+      console.log({p})
+      totalRevenue += p.amount
+  })
+  console.log({totalRevenue})
   // Format currency
   const formatCurrency = (amount: number) => {
     return `CHF ${amount.toFixed(2)}`;

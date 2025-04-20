@@ -1,186 +1,209 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle, ArrowRight, Loader } from 'lucide-react';
+import { CheckCircle, ArrowRight, Loader, AlertTriangle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext'; 
-import { db, storage } from '../firebase';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
-import { ref } from 'firebase/storage';
+import toast from 'react-hot-toast';
+
+// Re-define apiClient if not imported (use the same logic as in AuthContext)
+const API_URL = 'http://localhost:5001/api';
+const apiClient = {
+  async request(endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', body?: any) {
+    const token = localStorage.getItem('authToken');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    try {
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || `${response.status} ${response.statusText}`);
+      }
+      return data;
+    } catch (error) {
+      console.error(`API Error (${method} ${endpoint}):`, error);
+      throw error;
+    }
+  },
+  get: (endpoint: string) => apiClient.request(endpoint, 'GET'),
+  post: (endpoint: string, body: any) => apiClient.request(endpoint, 'POST', body),
+  put: (endpoint: string, body: any) => apiClient.request(endpoint, 'PUT', body),
+  delete: (endpoint: string) => apiClient.request(endpoint, 'DELETE'),
+};
+// End apiClient re-definition
+
+type VerificationStatus = 'verifying' | 'verified' | 'failed';
 
 const PaymentSuccessPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentUser } = useAuth();
-  const [isLoading, setIsLoading] = useState(true);
-  const [orderDetails, setOrderDetails] = useState<any>(null);
-  const [orderId, setOrderId] = useState<string>('');
+  const [status, setStatus] = useState<VerificationStatus>('verifying');
+  const [error, setError] = useState<string | null>(null);
+  const [verifiedOrderId, setVerifiedOrderId] = useState<string | null>(null);
 
-  // Get payment intent ID from URL if available
-  const paymentIntentId = searchParams.get('payment_intent');
-  
-  // Get order details from sessionStorage
   useEffect(() => {
-    const saveOrderToDatabase = async () => {
+    const sessionId = searchParams.get('session_id');
+    const orderIdFromUrl = searchParams.get('orderId');
+
+    if (!sessionId) {
+      setError('Ungültige Sitzungs-ID für die Zahlungsüberprüfung.');
+      setStatus('failed');
+      toast.error('Fehlende Zahlungs-Sitzungs-ID.');
+      return;
+    }
+
+    if (!orderIdFromUrl) {
+      setError('Bestell-ID fehlt in der URL.');
+      setStatus('failed');
+      toast.error('Fehlende Bestell-ID in der URL.');
+      return;
+    }
+
+    const verifyPayment = async () => {
+      setStatus('verifying');
+      setError(null);
       try {
-        const orderData = sessionStorage.getItem('currentOrder');
-        const storedOrderId = sessionStorage.getItem('currentOrderId') || '';
-        setOrderId(storedOrderId);
+        const verificationResult = await apiClient.get(`/payments/verify-payment/${sessionId}?orderId=${sessionStorage.getItem('currentOrderId')}`);
         
-        if (orderData) {
-          const parsedOrderData = JSON.parse(orderData);
-          setOrderDetails(parsedOrderData);
+        // Check if backend confirmed payment and orderId matches
+        if (verificationResult.status === 'paid' && verificationResult.orderId === orderIdFromUrl) {
+          setStatus('verified');
+          setVerifiedOrderId(verificationResult.orderId);
+          toast.success('Zahlung erfolgreich bestätigt!');
           
-          // Save order to Firestore if user is logged in
-          if (currentUser) {
-            // Create a new order document
-            const orderCollection = collection(db, 'orders');
-            const newOrderRef = await addDoc(orderCollection, {
-              orderId: storedOrderId,
-              userId: currentUser.uid,
-              packageType: parsedOrderData.package,
-              imageUrls: parsedOrderData.imageUrls || [],
-              musicUrl: parsedOrderData.musicUrl || null,
-              customization: parsedOrderData.customization || {},
-              upsells: parsedOrderData.upsells?.selectedOptions || [],
-              additionalFormats: parsedOrderData.upsells?.selectedFormats?.length > 1 
-                ? parsedOrderData.upsells.selectedFormats.filter((f: string) => f !== parsedOrderData.customization.selectedFormat) 
-                : [],
-              total: parsedOrderData.total,
-              status: 'In Bearbeitung',
-              createdAt: serverTimestamp(),
-              paymentIntentId: paymentIntentId || null
-            });
-            
-            // Update the order with its document ID for easier reference
-            await updateDoc(newOrderRef, {
-              docId: newOrderRef.id
-            });
-            
-            // If we have files in storage but no orderId, try to list and organize them
-            if (!storedOrderId) {
-              try {
-                // Look for recently uploaded files by this user
-                const userUploadsRef = ref(storage, `uploads/${currentUser.uid}`);
-                
-                // Note: Moving files in Firebase Storage requires a Cloud Function
-                // We would need to implement a Cloud Function to move files from temporary uploads to order folders
-                console.log('Order created with ID:', newOrderRef.id);
-                console.log('Files path:', `orders/${currentUser.uid}/${storedOrderId}`);
-              } catch (storageError) {
-                console.error('Error organizing storage files:', storageError);
-              }
-            }
-          }
+          // Optional: Trigger backend to update order status explicitly if not done via webhook/verification endpoint
+          // try {
+          //   await apiClient.put(`/orders/${verificationResult.orderId}/status`, { status: 'processing' });
+          // } catch (updateError) {
+          //   console.warn("Failed to explicitly update order status after verification:", updateError);
+          // }
+
+        } else {
+          throw new Error(verificationResult.message || 'Zahlung nicht erfolgreich oder Bestell-ID stimmt nicht überein.');
         }
-      } catch (error) {
-        console.error('Error parsing order data:', error);
+
+      } catch (err: any) {
+        console.error('Error verifying payment:', err);
+        setError(err.message || 'Fehler bei der Zahlungsüberprüfung.');
+        setStatus('failed');
+        toast.error('Fehler bei der Zahlungsüberprüfung.');
       } finally {
-        setIsLoading(false);
-        
-        // Clear order data from sessionStorage
-        sessionStorage.removeItem('currentOrder');
-        sessionStorage.removeItem('uploadedImages');
-        sessionStorage.removeItem('uploadedImageUrls');
-        sessionStorage.removeItem('currentOrderId');
-        sessionStorage.removeItem('uploadedMusic');
-        sessionStorage.removeItem('uploadedMusicUrl');
-        sessionStorage.removeItem('uploadDescription');
-        sessionStorage.removeItem('orderCustomization');
-        sessionStorage.removeItem('orderUpsells');
+          // Clear potentially sensitive session storage items regardless of success/failure
+          // Keep only non-sensitive ones if needed (e.g., package type for display)
+          sessionStorage.removeItem('currentOrder'); // Example - remove sensitive/unneeded items
+          sessionStorage.removeItem('uploadedImages');
+          sessionStorage.removeItem('uploadedImageUrls');
+          sessionStorage.removeItem('currentOrderId'); 
+          sessionStorage.removeItem('uploadedMusic');
+          sessionStorage.removeItem('uploadedMusicUrl');
+          sessionStorage.removeItem('uploadDescription');
+          sessionStorage.removeItem('orderCustomization');
+          sessionStorage.removeItem('orderUpsells');
       }
     };
 
-    saveOrderToDatabase();
-    
-    // Redirect to dashboard after 5 seconds if user is logged in
-    if (currentUser) {
-      const timer = setTimeout(() => {
-        navigate('/dashboard');
-      }, 5000);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [navigate, currentUser]);
+    verifyPayment();
+
+    // Setup redirect timer only after verification is successful
+    // We control the redirect manually below based on status
+
+  }, [searchParams]); // Depend on searchParams
+
+  // Handle redirect after status is determined
+  useEffect(() => {
+      if (status === 'verified' && currentUser) {
+          const timer = setTimeout(() => {
+              navigate('/dashboard/bestellungen'); // Redirect to orders page
+          }, 5000); 
+          return () => clearTimeout(timer);
+      }
+      // No automatic redirect if verification failed or user not logged in
+  }, [status, currentUser, navigate]);
 
   return (
-    <div className="min-h-screen bg-fmv-carbon flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", duration: 0.5 }}
-          className="bg-fmv-carbon-darker rounded-lg p-8 text-center border border-fmv-carbon-light/30 shadow-xl"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", duration: 0.6 }}
+          className="bg-gray-800 rounded-lg p-8 text-center border border-gray-700 shadow-xl"
         >
-          {isLoading ? (
+          {status === 'verifying' && (
             <div className="flex flex-col items-center justify-center py-8">
-              <Loader className="h-12 w-12 text-fmv-orange animate-spin mb-4" />
-              <p className="text-fmv-silk">Bestellung wird verarbeitet...</p>
+              <Loader className="h-12 w-12 text-indigo-400 animate-spin mb-4" />
+              <p className="text-gray-300">Zahlung wird überprüft...</p>
             </div>
-          ) : (
+          )}
+
+          {status === 'verified' && (
             <>
               <div className="mb-6">
-                <div className="bg-green-900/20 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+                <div className="bg-green-900/30 w-20 h-20 rounded-full flex items-center justify-center mx-auto border-2 border-green-500/50">
                   <CheckCircle className="h-12 w-12 text-green-400" />
                 </div>
               </div>
-
-              <h1 className="text-2xl font-medium text-fmv-silk mb-4">
+              <h1 className="text-2xl font-semibold text-white mb-3">
                 Zahlung erfolgreich!
               </h1>
-
-              <p className="text-fmv-silk/70 mb-8">
-                Vielen Dank für Ihre Bestellung. Wir haben mit der Bearbeitung Ihres Videos begonnen
-                und werden Sie über den Fortschritt auf dem Laufenden halten.
+              <p className="text-gray-400 mb-6">
+                Vielen Dank! Ihre Bestellung <span className="font-medium text-indigo-300">{verifiedOrderId}</span> wurde bestätigt.
+                Wir beginnen nun mit der Bearbeitung Ihres Videos.
               </p>
-
-              {orderDetails && (
-                <div className="bg-fmv-carbon-light/10 rounded-lg p-4 mb-6 text-left">
-                  <h3 className="text-fmv-orange font-medium mb-2">Bestellübersicht</h3>
-                  <p className="text-fmv-silk/80 text-sm">Paket: <span className="text-fmv-silk">{orderDetails.package.charAt(0).toUpperCase() + orderDetails.package.slice(1)}</span></p>
-                  {orderId && (
-                    <p className="text-fmv-silk/80 text-sm">Bestellnummer: <span className="text-fmv-silk">{orderId}</span></p>
-                  )}
-                  {orderDetails.upsells?.selectedOptions?.length > 0 && (
-                    <p className="text-fmv-silk/80 text-sm">Zusatzoptionen: <span className="text-fmv-silk">{orderDetails.upsells.selectedOptions.length}</span></p>
-                  )}
-                  <p className="text-fmv-silk/80 text-sm mt-2">Gesamtbetrag: <span className="text-fmv-orange font-medium">CHF {orderDetails.total.toFixed(2)}</span></p>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                {currentUser ? (
-                  <Link
-                    to="/dashboard"
-                    className="fmv-primary-btn px-6 py-3 inline-flex items-center justify-center w-full"
-                  >
-                    Zum Dashboard
-                    <ArrowRight className="ml-2 h-5 w-5" />
-                  </Link>
-                ) : (
-                  <div className="space-y-3">
-                    <Link
-                      to="/auth/register"
-                      className="fmv-primary-btn px-6 py-3 inline-flex items-center justify-center w-full"
-                    >
-                      Jetzt registrieren
-                      <ArrowRight className="ml-2 h-5 w-5" />
-                    </Link>
-                    <Link
-                      to="/"
-                      className="fmv-secondary-btn px-6 py-3 inline-flex items-center justify-center w-full"
-                    >
-                      Zurück zur Startseite
-                    </Link>
-                  </div>
-                )}
-
-                {currentUser && (
-                  <p className="text-sm text-fmv-silk/60">
-                    Sie werden in wenigen Sekunden automatisch weitergeleitet...
-                  </p>
-                )}
-              </div>
+               <div className="space-y-4">
+                 {currentUser ? (
+                   <>
+                     <Link
+                       to="/dashboard/bestellungen" // Link directly to orders
+                       className="inline-flex items-center justify-center w-full px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium transition-colors"
+                     >
+                       Meine Bestellungen anzeigen
+                       <ArrowRight className="ml-2 h-5 w-5" />
+                     </Link>
+                      <p className="text-sm text-gray-500">
+                        Sie werden in 5 Sekunden weitergeleitet...
+                      </p>
+                   </>
+                 ) : (
+                   <Link
+                     to="/"
+                     className="inline-flex items-center justify-center w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md font-medium transition-colors"
+                   >
+                     Zurück zur Startseite
+                   </Link>
+                 )}
+               </div>
             </>
+          )}
+          
+          {status === 'failed' && (
+              <>
+                 <div className="mb-6">
+                    <div className="bg-red-900/30 w-20 h-20 rounded-full flex items-center justify-center mx-auto border-2 border-red-500/50">
+                      <AlertTriangle className="h-12 w-12 text-red-400" />
+                    </div>
+                </div>
+                 <h1 className="text-2xl font-semibold text-white mb-3">
+                   Zahlungsüberprüfung fehlgeschlagen
+                 </h1>
+                 <p className="text-red-400 mb-6">
+                    {error || "Ihre Zahlung konnte nicht bestätigt werden. Bitte versuchen Sie es erneut oder kontaktieren Sie den Support."} 
+                 </p>
+                 <Link
+                   to="/bestellen" // Link back to the order start page or contact
+                   className="inline-flex items-center justify-center w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-md font-medium transition-colors"
+                 >
+                   Zurück zum Bestellvorgang
+                 </Link>
+              </>
           )}
         </motion.div>
       </div>

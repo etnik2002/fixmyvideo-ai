@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Filter, Play, Download, MoreHorizontal, Edit, Trash2, AlertTriangle, Film, Eye, Calendar, User } from 'lucide-react';
-import { collection, query, getDocs, orderBy, where, Timestamp } from 'firebase/firestore';
-import { db, getOrderFiles } from '../../firebase';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiClient } from '../../lib/apiClient';
 
 interface Video {
   id: string;
@@ -15,7 +14,7 @@ interface Video {
   url: string;
   thumbnail: string;
   date: string;
-  createdAt: Date;
+  createdAt: string;
   status: string;
   format: string;
   userEmail?: string;
@@ -30,7 +29,6 @@ const AdminVideos: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [formatFilter, setFormatFilter] = useState('all');
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [userDetails, setUserDetails] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const fetchVideos = async () => {
@@ -38,115 +36,32 @@ const AdminVideos: React.FC = () => {
       setError(null);
       
       try {
-        // Fetch all videos from the videos collection
-        const videosRef = collection(db, 'videos');
-        const q = query(videosRef, orderBy('createdAt', 'desc'));
-        
-        try {
-          const querySnapshot = await getDocs(q);
-          const videosData = querySnapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              orderId: data.orderId || 'Unbekannt',
-              userId: data.userId || 'Unbekannt',
-              title: data.title || 'Unbenanntes Video',
-              description: data.description || 'Keine Beschreibung',
-              url: data.url || '',
-              thumbnail: data.thumbnail || 'https://images.unsplash.com/photo-1581291518633-83b4ebd1d83e?q=80&w=600&auto=format&fit=crop',
-              date: data.createdAt instanceof Timestamp 
-                ? new Date(data.createdAt.toDate()).toLocaleDateString('de-DE')
-                : new Date().toLocaleDateString('de-DE'),
-              createdAt: data.createdAt instanceof Timestamp 
-                ? new Date(data.createdAt.toDate())
-                : new Date(),
-              status: data.status || 'Fertig',
-              format: data.format || '16:9'
-            };
-          });
+        // Fetch videos from API endpoint
+        const response = await apiClient.get('/admin/videos');
+        const videosData = response.data.map((video: any) => ({
+          id: video._id || video.id,
+          orderId: video.orderId || 'Unbekannt',
+          userId: video.userId || 'Unbekannt',
+          title: video.title || 'Unbenanntes Video',
+          description: video.description || 'Keine Beschreibung',
+          url: video.url || '',
+          thumbnail: video.thumbnail || 'https://images.unsplash.com/photo-1581291518633-83b4ebd1d83e?q=80&w=600&auto=format&fit=crop',
+          date: video.createdAt 
+            ? new Date(video.createdAt).toLocaleDateString('de-DE')
+            : new Date().toLocaleDateString('de-DE'),
+          createdAt: video.createdAt || new Date().toISOString(),
+          status: video.status || 'Fertig',
+          format: video.format || '16:9',
+          userName: video.user?.displayName || video.userName || 'Unbekannt',
+          userEmail: video.user?.email || video.userEmail || 'Keine E-Mail'
+        }));
           
-          setVideos(videosData);
-          
-          // If no videos in the videos collection, try to get them from orders
-          if (videosData.length === 0) {
-            const ordersRef = collection(db, 'orders');
-            const ordersQuery = query(
-              ordersRef,
-              where('status', 'in', ['Abgeschlossen', 'Fertig']),
-              orderBy('createdAt', 'desc')
-            );
-            
-            const ordersSnapshot = await getDocs(ordersQuery);
-            const ordersWithVideos = ordersSnapshot.docs.map(doc => {
-              const data = doc.data();
-              return {
-                id: doc.id,
-                orderId: data.orderId || doc.id,
-                userId: data.userId || 'Unbekannt',
-                title: `${data.packageType || 'Video'} (${data.orderId || doc.id})`,
-                description: `Video für Bestellung ${data.orderId || doc.id}`,
-                url: data.videoUrl || '',
-                thumbnail: data.imageUrls && data.imageUrls.length > 0 
-                  ? data.imageUrls[0] 
-                  : 'https://images.unsplash.com/photo-1581291518633-83b4ebd1d83e?q=80&w=600&auto=format&fit=crop',
-                date: data.completedAt instanceof Timestamp 
-                  ? new Date(data.completedAt.toDate()).toLocaleDateString('de-DE')
-                  : data.createdAt instanceof Timestamp 
-                    ? new Date(data.createdAt.toDate()).toLocaleDateString('de-DE')
-                    : new Date().toLocaleDateString('de-DE'),
-                createdAt: data.completedAt instanceof Timestamp 
-                  ? new Date(data.completedAt.toDate())
-                  : data.createdAt instanceof Timestamp 
-                    ? new Date(data.createdAt.toDate())
-                    : new Date(),
-                status: 'Fertig',
-                format: data.videoFormat || '16:9'
-              };
-            }).filter(video => video.url);
-            
-            setVideos(ordersWithVideos);
-          }
-          
-          // Fetch user details for each video
-          const userIds = [...new Set(videosData.map(video => video.userId))];
-          const usersRef = collection(db, 'users');
-          
-          const userDetailsObj: Record<string, any> = {};
-          
-          for (const userId of userIds) {
-            if (userId === 'guest') {
-              userDetailsObj[userId] = { displayName: 'Gast', email: 'guest@example.com' };
-              continue;
-            }
-            
-            try {
-              const userQuery = query(usersRef, where('uid', '==', userId));
-              const userSnapshot = await getDocs(userQuery);
-              
-              if (!userSnapshot.empty) {
-                const userData = userSnapshot.docs[0].data();
-                userDetailsObj[userId] = {
-                  displayName: userData.displayName || 'Unbekannt',
-                  email: userData.email || 'Keine E-Mail'
-                };
-              } else {
-                userDetailsObj[userId] = { displayName: 'Unbekannt', email: 'Nicht gefunden' };
-              }
-            } catch (userError) {
-              console.error(`Error fetching user ${userId}:`, userError);
-              userDetailsObj[userId] = { displayName: 'Fehler', email: 'Fehler beim Laden' };
-            }
-          }
-          
-          setUserDetails(userDetailsObj);
-        } catch (fetchError) {
-          console.error('Error fetching videos:', fetchError);
-          setError('Fehler beim Laden der Videos. Bitte versuchen Sie es später erneut.');
-          setVideos([]);
-        }
-      } catch (error) {
-        console.error('Error fetching videos:', error);
-        setError('Fehler beim Laden der Videos. Bitte versuchen Sie es später erneut.');
+        setVideos(videosData);
+      } catch (err: any) {
+        console.error('Error fetching videos:', err);
+        const message = err.response?.data?.message || err.message || 'Fehler beim Laden der Videos.';
+        setError(message);
+        setVideos([]);
       } finally {
         setLoading(false);
       }
@@ -155,21 +70,14 @@ const AdminVideos: React.FC = () => {
     fetchVideos();
   }, []);
 
-  // Enhance videos with user details
-  const enhancedVideos = videos.map(video => ({
-    ...video,
-    userName: userDetails[video.userId]?.displayName || 'Unbekannt',
-    userEmail: userDetails[video.userId]?.email || 'Keine E-Mail'
-  }));
-
   // Filter videos based on search term and filters
-  const filteredVideos = enhancedVideos.filter(video => {
+  const filteredVideos = videos.filter(video => {
     const matchesSearch = 
       video.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       video.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       video.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      video.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      video.userEmail.toLowerCase().includes(searchTerm.toLowerCase());
+      (video.userName && video.userName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (video.userEmail && video.userEmail.toLowerCase().includes(searchTerm.toLowerCase()));
       
     const matchesStatus = 
       statusFilter === 'all' || 
@@ -256,7 +164,7 @@ const AdminVideos: React.FC = () => {
                 {videos.filter(video => {
                   const now = new Date();
                   const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                  return video.createdAt >= firstDayOfMonth;
+                  return new Date(video.createdAt) >= firstDayOfMonth;
                 }).length}
               </p>
             </div>

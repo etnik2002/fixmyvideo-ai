@@ -1,12 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Upload, Image, Music, AlertCircle, Check } from 'lucide-react';
+import { Upload, Music, AlertCircle, Check } from 'lucide-react';
 import AnimatedElement from '../components/AnimatedElement';
-import { generateOrderId, uploadFiles, storage } from '../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
+import { apiClient } from '../lib/apiClient';
 
 interface FileWithPreview extends File {
   preview?: string;
@@ -113,32 +112,22 @@ const OrderUploadPage: React.FC = () => {
     setMusic(null);
   }, []);
 
-  // Helper function to upload a file to Firebase Storage with metadata
-  const uploadFile = async (file: File, path: string, orderId: string): Promise<string> => {
-    if (!currentUser) {
-      throw new Error('User must be logged in to upload files');
-    }
-
-    const storageRef = ref(storage, path);
-    const metadata = {
-      customMetadata: {
-        orderId: orderId,
-        userId: currentUser.uid
-      }
-    };
-    const snapshot = await uploadBytes(storageRef, file, metadata);
-    const downloadURL = await getDownloadURL(snapshot.ref);
-    return downloadURL;
-  };
-
-  // Helper function to upload multiple files to Firebase Storage
-  const uploadFiles = async (files: File[], basePath: string, orderId: string): Promise<string[]> => {
-    const uploadPromises = files.map((file, index) => {
-      const path = `${basePath}/${Date.now()}_${index}_${file.name}`;
-      return uploadFile(file, path, orderId);
+  // Helper function to convert a file to Base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        let base64String = reader.result as string;
+        // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+        const commaIndex = base64String.indexOf(',');
+        if (commaIndex !== -1) {
+          base64String = base64String.substring(commaIndex + 1);
+        }
+        resolve(base64String);
+      };
+      reader.onerror = error => reject(error);
     });
-    
-    return Promise.all(uploadPromises);
   };
 
   // Save upload data and navigate to next step
@@ -158,71 +147,40 @@ const OrderUploadPage: React.FC = () => {
     toast.loading('Dateien werden hochgeladen...');
     
     try {
-      // Generate a unique order ID
-      let newOrderId;
-      try {
-        newOrderId = await generateOrderId();
-      } catch (error) {
-        console.error('Error generating order ID:', error);
-        // Fallback to a timestamp-based ID if the function fails
-        newOrderId = `ORD-${Date.now().toString().slice(-8)}`;
-      }
+      const orderData = {
+        packageType: selectedPackage,
+        totalAmount: getPackagePrice(selectedPackage),
+        items: [],
+        description: description || undefined
+      };
+
+      const orderResponse = await apiClient.post('/orders', orderData);
+      console.log({orderResponse})
+      const newOrderId = orderResponse.order.orderId;
+      console.log({orderResponse})
       setOrderId(newOrderId);
       
-      // Store order ID in sessionStorage
       sessionStorage.setItem('currentOrderId', newOrderId);
       
-      // Define folder paths for organized storage
-      const imagesBasePath = `orders/${currentUser.uid}/${newOrderId}/images`;
-      const musicBasePath = `orders/${currentUser.uid}/${newOrderId}/music`;
+      const fileObjects = await Promise.all(
+        images.map(async (file, index) => {
+          const base64Data = await fileToBase64(file);
+          return {
+            filename: file.name,
+            contentType: file.type,
+            data: base64Data,
+          };
+        })
+      );
       
-      // Upload images to Firebase Storage
-      let imageUrls = [];
-      try {
-        // Try using the uploadFiles helper function first
-        imageUrls = await uploadFiles(images, imagesBasePath);
-      } catch (error) {
-        console.error('Error using uploadFiles helper:', error);
-        
-        // Fallback: Manual upload of each file
-        const uploadPromises = images.map((file, index) => {
-          const path = `${imagesBasePath}/${Date.now()}_${index}_${file.name}`;
-          const storageRef = ref(storage, path);
-          return uploadBytes(storageRef, file).then(snapshot => {
-            return getDownloadURL(snapshot.ref);
-          });
-        });
-        
-        imageUrls = await Promise.all(uploadPromises);
-      }
+      await apiClient.post(`/orders/${newOrderId}/upload`, { files: fileObjects });
       
-      // Upload music if provided (using the same uploadFiles function for consistency)
-      let musicUrl = null;
-      if (music) {
-        try {
-          const musicUrls = await uploadFiles([music], musicBasePath);
-          musicUrl = musicUrls[0];
-        } catch (error) {
-          console.error('Error uploading music:', error);
-          // Fallback: Manual upload
-          const path = `${musicBasePath}/${Date.now()}_${music.name}`;
-          const storageRef = ref(storage, path);
-          const snapshot = await uploadBytes(storageRef, music);
-          musicUrl = await getDownloadURL(snapshot.ref);
-        }
-      }
-      
-      // Store image names and URLs in sessionStorage
       const imageNames = images.map(img => img.name);
       sessionStorage.setItem('uploadedImages', imageNames.join(','));
       sessionStorage.setItem('orderId', newOrderId);
-      if (imageUrls && imageUrls.length > 0) {
-        sessionStorage.setItem('uploadedImageUrls', imageUrls.join(','));
-      }
       
-      if (musicUrl) {
-        sessionStorage.setItem('uploadedMusic', music!.name);
-        sessionStorage.setItem('uploadedMusicUrl', musicUrl);
+      if (music) {
+        sessionStorage.setItem('uploadedMusic', music.name);
       }
       
       // Store description
@@ -242,7 +200,7 @@ const OrderUploadPage: React.FC = () => {
       const errorMessage = error instanceof Error ? error.message : 'Ein unbekannter Fehler ist aufgetreten';
       console.error('Upload error details:', errorMessage);
       
-      if (errorMessage.includes('User must be logged in') || errorMessage.includes('permission-denied')) {
+      if (errorMessage.includes('401') || errorMessage.includes('auth')) {
         toast.error('Bitte melden Sie sich an, um Dateien hochzuladen');
         navigate('/auth/login', { state: location.pathname + location.search });
       } else {
@@ -250,6 +208,20 @@ const OrderUploadPage: React.FC = () => {
       }
       
       setIsUploading(false);
+    }
+  };
+
+  // Helper function to get package price
+  const getPackagePrice = (packageType: string): number => {
+    switch (packageType.toLowerCase()) {
+      case 'spark':
+        return 49;
+      case 'flash':
+        return 79;
+      case 'ultra':
+        return 129;
+      default:
+        return 79;
     }
   };
 

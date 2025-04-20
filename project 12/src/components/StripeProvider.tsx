@@ -1,7 +1,7 @@
 import React from 'react';
 import { Elements } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
-import { db } from '../firebase';
+import { loadStripe, StripeElementsOptions } from '@stripe/stripe-js';
+// import { db } from '../firebase'; // Removed unused import
 
 // Initialize Stripe
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
@@ -12,7 +12,7 @@ interface StripeProviderProps {
 }
 
 const StripeProvider: React.FC<StripeProviderProps> = ({ children, clientSecret }) => {
-  const options = {
+  const options: StripeElementsOptions = {
     clientSecret,
     appearance: {
       theme: 'flat',

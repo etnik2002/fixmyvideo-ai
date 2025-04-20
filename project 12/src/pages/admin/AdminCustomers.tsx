@@ -1,17 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Filter, Mail, Phone, Calendar, User, AlertTriangle, ArrowUpRight, ShoppingBag } from 'lucide-react';
-import { collection, query, getDocs, orderBy, where, Timestamp } from 'firebase/firestore';
-import { db } from '../../firebase';
 import { motion } from 'framer-motion';
+import { apiClient } from '../../lib/apiClient';
+
+// Define a more specific Customer interface based on expected API response
+interface Customer {
+  id: string; // Use id or _id based on API response
+  uid: string;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  createdAt: string; // Expect string date from API
+  timestamp: string; // Expect string date from API
+  orderCount: number;
+  totalSpent: number;
+}
 
 const AdminCustomers: React.FC = () => {
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]); // Use Customer interface
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [customerOrders, setCustomerOrders] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -19,55 +31,34 @@ const AdminCustomers: React.FC = () => {
       setError(null);
       
       try {
-        // Fetch all users
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, orderBy('createdAt', 'desc'));
+        // Fetch customers from API endpoint
+        const response = await apiClient.get('/admin/users'); // Use API call
         
-        try {
-          const querySnapshot = await getDocs(q);
-          const customersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
+        const customersData = response.data.map((user: any) => ({ // Map API response
+          id: user._id || user.id, // Adjust based on API response field name
+          uid: user.uid || user._id || user.id, // Use uid or fallback
+          name: user.displayName || user.name || 'Unbekannt',
+          email: user.email || 'Keine E-Mail',
+          phone: user.phone || 'Nicht angegeben',
+          // Combine address fields if they come separately from the API
+          address: user.address 
+            ? `${user.address}, ${user.zipCode || ''} ${user.city || ''}, ${user.country || ''}` 
+            : 'Nicht angegeben',
+          createdAt: user.createdAt 
+            ? new Date(user.createdAt).toLocaleDateString('de-DE') // Format date string
+            : 'Unbekannt',
+          timestamp: user.createdAt || new Date().toISOString(), // Store date string
+          orderCount: user.orderCount || 0, // Assume API provides this
+          totalSpent: user.totalSpent || 0    // Assume API provides this
+        }));
           
-          setCustomers(customersData);
-          
-          // Fetch order counts for each customer
-          const ordersRef = collection(db, 'orders');
-          const orderCounts: Record<string, any> = {};
-          
-          for (const customer of customersData) {
-            try {
-              // Get order count
-              const orderQuery = query(ordersRef, where('userId', '==', customer.uid));
-              const orderSnapshot = await getDocs(orderQuery);
-              
-              // Calculate total spent
-              let totalSpent = 0;
-              orderSnapshot.forEach(doc => {
-                const orderData = doc.data();
-                totalSpent += orderData.total || 0;
-              });
-              
-              orderCounts[customer.uid] = {
-                count: orderSnapshot.size,
-                totalSpent
-              };
-            } catch (orderError) {
-              console.error(`Error fetching orders for customer ${customer.uid}:`, orderError);
-              orderCounts[customer.uid] = { count: 0, totalSpent: 0 };
-            }
-          }
-          
-          setCustomerOrders(orderCounts);
-        } catch (fetchError) {
-          console.error('Error fetching customers:', fetchError);
-          setError('Fehler beim Laden der Kunden. Bitte versuchen Sie es später erneut.');
-          setCustomers([]);
-        }
-      } catch (error) {
-        console.error('Error fetching customers:', error);
-        setError('Fehler beim Laden der Kunden. Bitte versuchen Sie es später erneut.');
+        setCustomers(customersData);
+
+      } catch (err: any) {
+        console.error('Error fetching customers:', err);
+        const message = err.response?.data?.message || err.message || 'Fehler beim Laden der Kunden.';
+        setError(message);
+        setCustomers([]);
       } finally {
         setLoading(false);
       }
@@ -76,24 +67,8 @@ const AdminCustomers: React.FC = () => {
     fetchCustomers();
   }, []);
 
-  // Format customers for display
-  const formatCustomers = (customers: any[]) => {
-    return customers.map(customer => ({
-      id: customer.id,
-      uid: customer.uid,
-      name: customer.displayName || 'Unbekannt',
-      email: customer.email || 'Keine E-Mail',
-      phone: customer.phone || 'Nicht angegeben',
-      address: customer.address ? `${customer.address}, ${customer.zipCode || ''} ${customer.city || ''}, ${customer.country || ''}` : 'Nicht angegeben',
-      createdAt: customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('de-DE') : 'Unbekannt',
-      timestamp: customer.createdAt ? new Date(customer.createdAt) : new Date(),
-      orderCount: customerOrders[customer.uid]?.count || 0,
-      totalSpent: customerOrders[customer.uid]?.totalSpent || 0
-    }));
-  };
-
   // Filter customers based on search term and status
-  const filteredCustomers = formatCustomers(customers).filter(customer => {
+  const filteredCustomers = customers.filter(customer => { // Use customers directly
     const matchesSearch = 
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -158,7 +133,7 @@ const AdminCustomers: React.FC = () => {
             <div>
               <p className="text-fmv-silk/60 text-sm">Aktive Kunden</p>
               <p className="text-2xl font-medium text-fmv-silk">
-                {formatCustomers(customers).filter(c => c.orderCount > 0).length}
+                {customers.filter(c => c.orderCount > 0).length}
               </p>
             </div>
           </div>
@@ -175,10 +150,10 @@ const AdminCustomers: React.FC = () => {
             <div>
               <p className="text-fmv-silk/60 text-sm">Neue Kunden (30 Tage)</p>
               <p className="text-2xl font-medium text-fmv-silk">
-                {formatCustomers(customers).filter(c => {
+                {customers.filter(c => {
                   const thirtyDaysAgo = new Date();
                   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                  return c.timestamp >= thirtyDaysAgo;
+                  return new Date(c.timestamp) >= thirtyDaysAgo; // Compare parsed date
                 }).length}
               </p>
             </div>

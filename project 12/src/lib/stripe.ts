@@ -1,135 +1,92 @@
 import { videoPackages, upsellOptions, upsellOptionMap } from '../stripe-config';
-import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+
+// Re-define apiClient if not imported (use the same logic as in AuthContext)
+const API_URL = 'http://localhost:5001/api';
+const apiClient = {
+  async request(endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', body?: any) {
+    const token = localStorage.getItem('authToken');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    try {
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || `${response.status} ${response.statusText}`);
+      }
+      return data;
+    } catch (error) {
+      console.error(`API Error (${method} ${endpoint}):`, error);
+      throw error;
+    }
+  },
+  get: (endpoint: string) => apiClient.request(endpoint, 'GET'),
+  post: (endpoint: string, body: any) => apiClient.request(endpoint, 'POST', body),
+  put: (endpoint: string, body: any) => apiClient.request(endpoint, 'PUT', body),
+  delete: (endpoint: string) => apiClient.request(endpoint, 'DELETE'),
+};
+// End apiClient re-definition
 
 // Create a checkout session for a package
 export const createCheckoutSession = async (
+  orderId: string,
   packageType: string,
   selectedOptions: string[] = [],
   additionalFormats: number = 0
 ) => {
   try {
-    // Get the package price ID
-    const packagePriceId = videoPackages[packageType]?.priceId;
-    
-    if (!packagePriceId) {
-      throw new Error('Invalid package type');
+    const packageKey = packageType
+    const baseAmount = videoPackages[packageKey]?.price;
+    console.log({packageType, baseAmount})
+    if (baseAmount === undefined) {
+      throw new Error('Invalid package type specified');
+    }
+    if (!orderId) {
+      throw new Error('Order ID must be provided to create a checkout session');
     }
 
-    // Create a checkout session in Stripe via Firebase
-    const checkoutSessionRef = collection(db, 'stripeCheckout');
-    const docRef = await addDoc(checkoutSessionRef, {
-      priceId: packagePriceId,
-      successUrl: `${window.location.origin}/payment/success`,
-      cancelUrl: `${window.location.origin}/bestellen/review?package=${packageType}`,
-      userId: auth.currentUser?.uid || 'guest',
-      mode: 'payment',
-      timestamp: new Date(),
-      upsellOptions: selectedOptions,
-      additionalFormats: additionalFormats
+    // Calculate total amount based on package, options, and formats
+    let totalAmount = baseAmount;
+    selectedOptions.forEach(optionId => {
+      const mappedId = upsellOptionMap[optionId];
+      totalAmount += upsellOptions[mappedId]?.price || 0;
+    });
+    totalAmount += additionalFormats * 5; // Add cost for additional formats
+
+    // Create a checkout session directly via backend API
+    const sessionData = await apiClient.post('/payments/create-checkout-session', {
+        orderId: orderId,         // Pass the existing order ID
+        amount: totalAmount,      // Pass the calculated total amount
+        currency: 'chf',         // Assuming currency is CHF
+        description: `${videoPackages[packageKey]?.name || packageType} Video Package` // Adjust description as needed
+        // Add selectedOptions, additionalFormats to metadata if needed by backend/webhook
     });
 
-    // Wait for the Cloud Function to process the request and update the document
-    let attempts = 0;
-    const maxAttempts = 10;
-    
-    while (attempts < maxAttempts) {
-      attempts++;
-      
-      // Wait a bit before checking
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Get the updated document
-      const docSnap = await getDocs(query(
-        collection(db, 'stripeCheckout'),
-        where('__name__', '==', docRef.id)
-      ));
-      
-      if (!docSnap.empty) {
-        const data = docSnap.docs[0].data();
-        
-        // Check if the session URL is available
-        if (data.sessionUrl) {
-          return { 
-            sessionId: data.sessionId,
-            url: data.sessionUrl
-          };
-        }
-        
-        // Check if there was an error
-        if (data.error) {
-          throw new Error(data.error);
-        }
-      }
-      
-      // If we've reached the maximum number of attempts, throw an error
-      if (attempts >= maxAttempts) {
-        throw new Error('Timeout waiting for checkout session');
-      }
-    }
-    
-    throw new Error('Failed to create checkout session');
+    // Backend returns { id: sessionId, url: sessionUrl }
+    return { 
+      sessionId: sessionData.id,
+      url: sessionData.url
+    };
+
   } catch (error) {
     console.error('Error creating checkout session:', error);
-    throw error;
+    // Try to pass specific backend error message
+    const message = error instanceof Error ? error.message : 'Failed to create checkout session';
+    throw new Error(message);
   }
-};
-
-// Get user subscription status
-export const getUserSubscription = async () => {
-  try {
-    if (!auth.currentUser) {
-      return null;
-    }
-    
-    const subscriptionsRef = collection(db, 'subscriptions');
-    const q = query(subscriptionsRef, where('userId', '==', auth.currentUser.uid));
-    const querySnapshot = await getDocs(q);
-    
-    return querySnapshot.docs[0]?.data() || null;
-  } catch (error) {
-    console.error('Error fetching user subscription:', error);
-    throw error;
-  }
-};
-
-// Get user orders
-export const getUserOrders = async () => {
-  try {
-    if (!auth.currentUser) {
-      return [];
-    }
-    
-    const ordersRef = collection(db, 'orders');
-    const q = query(ordersRef, where('userId', '==', auth.currentUser.uid));
-    const querySnapshot = await getDocs(q);
-    
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-  } catch (error) {
-    console.error('Error fetching user orders:', error);
-    throw error;
-  }
-};
-
-// Helper function to get package price
-export const getPackagePrice = (packageType: 'Spark' | 'Flash' | 'Ultra'): string => {
-  const packageKey = packageType.toLowerCase();
-  return videoPackages[packageKey]?.priceId || '';
 };
 
 // Helper function to get package amount
 export const getPackageAmount = (packageType: 'Spark' | 'Flash' | 'Ultra'): number => {
-  const packageKey = packageType.toLowerCase();
+  const packageKey = packageType
   return videoPackages[packageKey]?.price || 0;
-};
-
-// Helper function to get upsell option price
-export const getUpsellPrice = (optionId: string): string => {
-  const mappedId = upsellOptionMap[optionId];
-  return upsellOptions[mappedId]?.priceId || '';
 };
 
 // Helper function to get upsell option amount

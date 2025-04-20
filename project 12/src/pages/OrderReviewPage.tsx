@@ -15,7 +15,7 @@ const OrderReviewPage: React.FC = () => {
   
   // Get selected package from URL params
   const searchParams = new URLSearchParams(location.search);
-  const selectedPackage = searchParams.get('package') || 'flash';
+  const selectedPackage = searchParams.get('package') || 'ultra';
   const uploadedImagesCount = parseInt(searchParams.get('images') || '5');
   
   // Get customization options from URL or sessionStorage
@@ -198,6 +198,7 @@ const OrderReviewPage: React.FC = () => {
     setIsProcessing(true);
     
     try {
+      console.log({total})
       // Save order details to sessionStorage for retrieval after payment
       sessionStorage.setItem('currentOrder', JSON.stringify({
         package: selectedPackage,
@@ -210,6 +211,7 @@ const OrderReviewPage: React.FC = () => {
       
       // Create checkout session
       const { url } = await createCheckoutSession(
+        new Date().getMilliseconds().toString(),
         selectedPackage,
         selectedUpsellOptions,
         additionalFormats.length

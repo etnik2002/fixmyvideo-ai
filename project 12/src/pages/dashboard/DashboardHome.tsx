@@ -2,22 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Film, ShoppingBag, Clock, Star, ArrowRight, ArrowUpRight, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { collection, query, where, getDocs, orderBy, limit, Timestamp, DocumentData } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { useAuth } from '../../contexts/AuthContext';
+import { apiClient, useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const DashboardHome: React.FC = () => {
-  const { userData, currentUser } = useAuth();
+  const { currentUser } = useAuth();
   const [orders, setOrders] = useState<any[]>([]);
-  const [subscription, setSubscription] = useState<any>(null);
   const [userVideos, setUserVideos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!currentUser?.uid) {
+      if (!currentUser?.id) {
         setLoading(false);
         return;
       }
@@ -26,37 +23,25 @@ const DashboardHome: React.FC = () => {
       setError(null);
       
       try {
-        // Fetch orders from Firestore
-        const ordersRef = collection(db, 'orders');
-        const q = query(
-          ordersRef,
-          where('userId', '==', currentUser.uid),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        );
-        
-        try {
-          const querySnapshot = await getDocs(q);
-          const ordersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          
+        // Fetch orders from API
+        const response = await apiClient.get('/orders/myorders?limit=5&sort=createdAt:desc');
+
+        if (response.status === 200) {
+          const ordersData = response.data;
           setOrders(ordersData);
           
           // Extract videos from orders
-          const extractedVideos: DocumentData[] = [];
-          ordersData.forEach(order => {
+          const extractedVideos: any[] = [];
+          ordersData.forEach((order: any) => {
             if (order.status === 'Abgeschlossen' || order.status === 'Fertig') {
-              // For completed orders, create a video entry
               extractedVideos.push({
-                id: order.id,
+                id: order._id || order.id,
                 title: `${order.packageType || 'Video'} ${order.orderId ? `(${order.orderId})` : ''}`,
                 thumbnail: order.imageUrls && order.imageUrls.length > 0 
                   ? order.imageUrls[0] 
                   : 'https://images.unsplash.com/photo-1581291518633-83b4ebd1d83e?q=80&w=600&auto=format&fit=crop',
-                date: order.createdAt instanceof Timestamp 
-                  ? new Date(order.createdAt.toDate()).toLocaleDateString('de-DE')
+                date: order.createdAt
+                  ? new Date(order.createdAt).toLocaleDateString('de-DE')
                   : new Date().toLocaleDateString('de-DE'),
                 status: 'Fertig'
               });
@@ -64,39 +49,24 @@ const DashboardHome: React.FC = () => {
           });
           
           setUserVideos(extractedVideos.slice(0, 3)); // Show up to 3 videos
-        } catch (ordersError) {
-          console.error('Error fetching orders:', ordersError);
-          setError('Fehler beim Laden der Bestellungen');
+        } else {
+          console.error('Error fetching orders:', response.statusText);
+          setError(`Fehler beim Laden der Bestellungen (${response.status})`);
           setOrders([]);
-        }
-        
-        // Fetch subscription status if needed
-        try {
-          const subscriptionsRef = collection(db, 'subscriptions');
-          const subQuery = query(
-            subscriptionsRef,
-            where('userId', '==', currentUser.uid),
-            limit(1)
-          );
-          
-          const subSnapshot = await getDocs(subQuery);
-          if (!subSnapshot.empty) {
-            setSubscription(subSnapshot.docs[0].data());
-          }
-        } catch (subError) {
-          console.error('Error fetching subscription:', subError);
-          // Non-critical error, don't set the main error state
         }
       } catch (error: any) {
         console.error('Error fetching dashboard data:', error);
-        
-        // More specific error messages based on error code
-        if (error.code === 'permission-denied') {
-          setError('Keine Berechtigung zum Laden der Daten. Bitte melden Sie sich erneut an.');
-        } else if (error.code === 'not-found') {
-          setError('Daten nicht gefunden. Bitte versuchen Sie es später erneut.');
+        // Handle API errors (e.g., network error)
+        if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            setError(`Fehler ${error.response.status}: ${error.response.data.message || 'Serverfehler'}`);
+        } else if (error.request) {
+            // The request was made but no response was received
+            setError('Keine Antwort vom Server erhalten. Netzwerkproblem?');
         } else {
-          setError('Fehler beim Laden der Daten. Bitte versuchen Sie es später erneut.');
+            // Something happened in setting up the request that triggered an Error
+            setError('Fehler beim Senden der Anfrage.');
         }
       } finally {
         setLoading(false);
@@ -109,11 +79,11 @@ const DashboardHome: React.FC = () => {
   // Format order data for display
   const formatOrders = (orders: any[]) => {
     return orders.map(order => ({
-      id: order.orderId || order.id,
+      id: order.orderId || order._id || order.id,
       type: order.packageType || 'Flash',
       status: order.status || 'In Bearbeitung',
-      date: order.createdAt && order.createdAt instanceof Timestamp 
-        ? new Date(order.createdAt.toDate()).toLocaleDateString('de-DE') 
+      date: order.createdAt
+        ? new Date(order.createdAt).toLocaleDateString('de-DE')
         : new Date().toLocaleDateString('de-DE'),
       price: `CHF ${order.total?.toFixed(2) || '0.00'}`,
       videos: order.videoIds || []
@@ -133,7 +103,7 @@ const DashboardHome: React.FC = () => {
   
   // Calculate statistics
   const totalOrders = orders.length;
-  const inProgressOrders = orders.filter(order => order.order_status !== 'completed').length;
+  const inProgressOrders = orders.filter(order => order.status !== 'Abgeschlossen' && order.status !== 'Fertig').length;
   const totalVideos = userVideos.length;
 
   return (
@@ -143,7 +113,7 @@ const DashboardHome: React.FC = () => {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
           <div>
             <h1 className="text-2xl font-medium text-fmv-silk mb-2">
-              Willkommen, {userData?.displayName || 'im Dashboard'}!
+              Willkommen, {currentUser?.displayName || 'im Dashboard'}!
             </h1>
             <p className="text-fmv-silk/70">
               Hier finden Sie eine Übersicht Ihrer Aktivitäten und Videos.

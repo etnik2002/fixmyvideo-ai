@@ -1,12 +1,92 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Filter, Search, Eye, Clock, CheckCircle, ShoppingBag, AlertTriangle, Mail, User, Calendar, DollarSign } from 'lucide-react';
-import { collection, query, where, getDocs, orderBy, Timestamp } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
+// Re-define apiClient if not imported (use the same logic as in AuthContext)
+const API_URL = 'http://localhost:5001/api';
+const apiClient = {
+  async request(endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', body?: any) {
+    const token = localStorage.getItem('authToken');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    try {
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || `${response.status} ${response.statusText}`);
+      }
+      return data;
+    } catch (error) {
+      console.error(`API Error (${method} ${endpoint}):`, error);
+      throw error;
+    }
+  },
+  get: (endpoint: string) => apiClient.request(endpoint, 'GET'),
+  post: (endpoint: string, body: any) => apiClient.request(endpoint, 'POST', body),
+  put: (endpoint: string, body: any) => apiClient.request(endpoint, 'PUT', body),
+  delete: (endpoint: string) => apiClient.request(endpoint, 'DELETE'),
+};
+// End apiClient re-definition
+
+// Interface matching the backend response for GET /api/orders (admin route)
+interface AdminOrder {
+  _id: string;
+  orderId: string;
+  user: { // Populated user details
+    _id: string;
+    name: string;
+    email: string;
+  };
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
+  packageType?: string; // Optional fields based on your model/API response
+  totalAmount?: number;
+  createdAt: string; // ISO Date string
+  updatedAt: string; // ISO Date string
+  imageCount?: number; // Example: Add if backend calculates this
+  // Add other fields returned by the API as needed
+}
+
+// Helper to format date
+const formatDate = (dateString: string | undefined): string => {
+    if (!dateString) return 'N/A';
+    try {
+        return new Date(dateString).toLocaleDateString('de-DE', {
+            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+    } catch (e) {
+        return 'Invalid Date';
+    }
+}
+
+// Helper to format currency
+const formatPrice = (amount: number | undefined): string => {
+    if (amount === undefined || amount === null) return 'N/A';
+    return `CHF ${amount.toFixed(2)}`;
+}
+
+// Helper to get status class
+const getStatusClass = (status: string): string => {
+  switch (status.toLowerCase()) {
+    case 'completed': return 'bg-green-900/30 text-green-400 border border-green-700/50';
+    case 'processing': return 'bg-yellow-900/30 text-yellow-400 border border-yellow-700/50';
+    case 'pending': return 'bg-blue-900/30 text-blue-400 border border-blue-700/50';
+    case 'cancelled': return 'bg-red-900/30 text-red-400 border border-red-700/50';
+    default: return 'bg-gray-700/50 text-gray-400 border border-gray-600';
+  }
+};
+
 const AdminOrders: React.FC = () => {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -14,17 +94,16 @@ const AdminOrders: React.FC = () => {
   const [packageFilter, setPackageFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [searchParams, setSearchParams] = useSearchParams();
-  const [userDetails, setUserDetails] = useState<Record<string, any>>({});
 
   useEffect(() => {
-    // Check if there's a status filter in the URL
+    // Apply initial filter from URL if present
     const urlStatus = searchParams.get('status');
     if (urlStatus) {
-      if (urlStatus === 'pending') {
-        setStatusFilter('in bearbeitung');
-      } else if (urlStatus === 'completed') {
-        setStatusFilter('abgeschlossen');
-      }
+        // Map URL param values to backend status values if needed
+        const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+        if (validStatuses.includes(urlStatus)) {
+             setStatusFilter(urlStatus);
+        }
     }
 
     const fetchOrders = async () => {
@@ -32,395 +111,258 @@ const AdminOrders: React.FC = () => {
       setError(null);
 
       try {
-        // Create base query
-        const ordersRef = collection(db, 'orders');
-        console.log({ ordersRef })
-        let q = query(ordersRef, orderBy('createdAt', 'desc'));
+        // Fetch all orders from the admin endpoint
+        // Add filtering params here if/when backend supports them
+        // e.g., apiClient.get(`/orders?status=${statusFilter}&search=${searchTerm}`)
+        const ordersData: AdminOrder[] = await apiClient.get('/dashboard/admin');
+        console.log({ordersData})
+        setOrders(ordersData);
 
-        // Apply status filter if needed
-        if (urlStatus === 'pending') {
-          q = query(ordersRef, where('status', '==', 'In Bearbeitung'), orderBy('createdAt', 'desc'));
-        } else if (urlStatus === 'completed') {
-          q = query(
-            ordersRef,
-            where('status', 'in', ['Abgeschlossen', 'Fertig']),
-            orderBy('createdAt', 'desc')
-          );
-        }
-
-        try {
-          const querySnapshot = await getDocs(q);
-          const ordersData = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          console.log({ ordersData })
-          setOrders(ordersData);
-          // Fetch user details for each order
-          const userIds = [...new Set(ordersData.map(order => order.userId))];
-          const usersRef = collection(db, 'users');
-
-          const userDetailsObj: Record<string, any> = {};
-
-          for (const userId of userIds) {
-            if (userId === 'guest') {
-              userDetailsObj[userId] = { displayName: 'Gast', email: 'guest@example.com' };
-              continue;
-            }
-
-            try {
-              const userQuery = query(usersRef, where('uid', '==', userId));
-              const userSnapshot = await getDocs(userQuery);
-
-              if (!userSnapshot.empty) {
-                const userData = userSnapshot.docs[0].data();
-                userDetailsObj[userId] = {
-                  displayName: userData.displayName || 'Unbekannt',
-                  email: userData.email || 'Keine E-Mail'
-                };
-              } else {
-                userDetailsObj[userId] = { displayName: 'Unbekannt', email: 'Nicht gefunden' };
-              }
-            } catch (userError) {
-              console.error(`Error fetching user ${userId}:`, userError);
-              userDetailsObj[userId] = { displayName: 'Fehler', email: 'Fehler beim Laden' };
-            }
-          }
-
-          setUserDetails(userDetailsObj);
-        } catch (fetchError) {
-          console.error('Error fetching orders:', fetchError);
-          setError('Fehler beim Laden der Bestellungen. Bitte versuchen Sie es später erneut.');
-          setOrders([]);
-        }
-      } catch (error) {
-        console.error('Error fetching orders:', error);
-        setError('Fehler beim Laden der Bestellungen. Bitte versuchen Sie es später erneut.');
+      } catch (err: any) {
+        console.error('Error fetching orders:', err);
+        setError(err.message || 'Fehler beim Laden der Bestellungen. Bitte versuchen Sie es später erneut.');
+        setOrders([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchOrders();
-  }, [searchParams]);
+    // Re-fetch if URL filters change (though currently handled client-side)
+  }, [searchParams]); 
 
-  // Format orders for display
-  const formatOrders = (orders: any[]) => {
-    return orders.map(order => ({
-      id: order.id,
-      orderId: order.orderId || `ORD-${order.id.substring(0, 5).toUpperCase()}`,
-      userId: order.userId,
-      userEmail: userDetails[order.userId]?.email || 'Unbekannt',
-      userName: userDetails[order.userId]?.displayName || 'Unbekannt',
-      type: order.packageType || 'Flash',
-      status: order.status || 'In Bearbeitung',
-      date: order.createdAt instanceof Timestamp
-        ? new Date(order.createdAt.toDate()).toLocaleDateString('de-DE')
-        : new Date().toLocaleDateString('de-DE'),
-      timestamp: order.createdAt instanceof Timestamp
-        ? order.createdAt.toDate()
-        : new Date(),
-      price: `CHF ${order.total?.toFixed(2) || '0.00'}`,
-      imageCount: order.imageUrls?.length || 0
-    }));
-  };
+  // Client-side filtering logic
+  const filteredOrders = useMemo(() => {
+      return orders?.recentOrders?.filter(order => {
+          const searchTermLower = searchTerm.toLowerCase();
+          const matchesSearch =
+            order.orderId.toLowerCase().includes(searchTermLower) ||
+            order.user.email.toLowerCase().includes(searchTermLower) ||
+            order.user.name.toLowerCase().includes(searchTermLower) ||
+            (order.packageType && order?.packageType.includes(searchTermLower));
 
-  // Filter orders based on search term and status
-  const filteredOrders = formatOrders(orders).filter(order => {
-    const matchesSearch =
-      order.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.userId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.type.toLowerCase().includes(searchTerm.toLowerCase());
+          const matchesStatus =
+            statusFilter === 'all' ||
+            order.status.toLowerCase() === statusFilter.toLowerCase();
 
-    const matchesStatus =
-      statusFilter === 'all' ||
-      order.status.toLowerCase().includes(statusFilter.toLowerCase());
+          const matchesPackage =
+            packageFilter === 'all' ||
+            (order.packageType && order?.packageType === packageFilter.toLowerCase());
 
-    const matchesPackage =
-      packageFilter === 'all' ||
-      order.type.toLowerCase() === packageFilter.toLowerCase();
+          let matchesDate = true;
+          if (dateFilter !== 'all' && order.createdAt) {
+              const orderDate = new Date(order.createdAt);
+              const now = new Date();
+              let startDate = new Date();
 
-    // Date filtering
-    let matchesDate = true;
-    const now = new Date();
+              if (dateFilter === 'today') {
+                  startDate.setHours(0, 0, 0, 0);
+              } else if (dateFilter === 'week') {
+                  startDate.setDate(now.getDate() - 7);
+                  startDate.setHours(0, 0, 0, 0);
+              } else if (dateFilter === 'month') {
+                  startDate.setMonth(now.getMonth() - 1);
+                  startDate.setHours(0, 0, 0, 0);
+              }
+              matchesDate = orderDate >= startDate;
+          }
 
-    if (dateFilter === 'today') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      matchesDate = order.timestamp >= today;
-    } else if (dateFilter === 'week') {
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      matchesDate = order.timestamp >= weekAgo;
-    } else if (dateFilter === 'month') {
-      const monthAgo = new Date();
-      monthAgo.setMonth(monthAgo.getMonth() - 1);
-      matchesDate = order.timestamp >= monthAgo;
-    }
+          return matchesSearch && matchesStatus && matchesPackage && matchesDate;
+      });
+  }, [orders, searchTerm, statusFilter, packageFilter, dateFilter]);
 
-    return matchesSearch && matchesStatus && matchesPackage && matchesDate;
-  });
-
-  // Handle status filter change
+  // Handle status filter change and update URL
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const status = e.target.value;
     setStatusFilter(status);
-
-    // Update URL params
+    // Update URL param
     if (status === 'all') {
       searchParams.delete('status');
-    } else if (status === 'in bearbeitung') {
-      searchParams.set('status', 'pending');
-    } else if (status === 'abgeschlossen' || status === 'fertig') {
-      searchParams.set('status', 'completed');
+    } else {
+      searchParams.set('status', status);
     }
-
-    setSearchParams(searchParams);
+    setSearchParams(searchParams, { replace: true }); // Use replace to avoid history clutter
   };
 
   // Calculate total revenue from filtered orders
-  const totalRevenue = filteredOrders.reduce((sum, order) => {
-    const price = parseFloat(order.price.replace('CHF ', ''));
-    return sum + (isNaN(price) ? 0 : price);
-  }, 0);
+  const totalRevenue = useMemo(() => {
+      return filteredOrders?.reduce((sum, order) => {
+          return sum + (order.totalAmount || 0);
+      }, 0);
+  }, [filteredOrders]);
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-red-900/20 to-red-900/10 p-6 rounded-lg border border-red-900/30">
-        <h1 className="text-2xl font-medium text-fmv-silk mb-2">Bestellungen verwalten</h1>
-        <p className="text-fmv-silk/70">Alle Bestellungen im Überblick - Bearbeiten, Hochladen und Status aktualisieren.</p>
+      <div className="bg-gradient-to-r from-gray-800 to-gray-900 p-6 rounded-lg border border-gray-700 shadow-md">
+        <h1 className="text-2xl font-semibold text-white mb-1">Bestellungen verwalten</h1>
+        <p className="text-gray-400">Alle Bestellungen im Überblick.</p>
       </div>
 
       {/* Error Message */}
       {error && (
-        <div className="bg-red-900/20 border border-red-900/30 rounded-lg p-4 text-red-400">
+        <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-4 text-red-300">
           <div className="flex items-start">
-            <AlertTriangle className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0" />
-            <p>{error}</p>
+            <AlertTriangle className="h-5 w-5 mr-3 mt-0.5 flex-shrink-0 text-red-400" />
+            <span>{error}</span>
           </div>
         </div>
       )}
 
       {/* Summary Stats */}
-      <div className="bg-fmv-carbon-darker p-4 rounded-lg shadow-md border border-fmv-carbon-light/20 mb-4">
+      <div className="bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-700 mb-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="flex items-center">
-            <div className="bg-fmv-orange/20 p-2 rounded-full mr-3">
-              <ShoppingBag className="h-5 w-5 text-fmv-orange" />
-            </div>
-            <div>
-              <p className="text-fmv-silk/60 text-xs">Gefilterte Bestellungen</p>
-              <p className="text-lg font-medium text-fmv-silk">{filteredOrders.length}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center">
-            <div className="bg-green-500/20 p-2 rounded-full mr-3">
-              <DollarSign className="h-5 w-5 text-green-500" />
-            </div>
-            <div>
-              <p className="text-fmv-silk/60 text-xs">Gesamtumsatz (gefiltert)</p>
-              <p className="text-lg font-medium text-fmv-silk">CHF {totalRevenue.toFixed(2)}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center">
-            <div className="bg-blue-500/20 p-2 rounded-full mr-3">
-              <DollarSign className="h-5 w-5 text-blue-500" />
-            </div>
-            <div>
-              <p className="text-fmv-silk/60 text-xs">Durchschnittswert</p>
-              <p className="text-lg font-medium text-fmv-silk">
-                CHF {filteredOrders.length > 0 ? (totalRevenue / filteredOrders.length).toFixed(2) : '0.00'}
-              </p>
-            </div>
-          </div>
-        </div>
+          <div className="flex items-center p-3 bg-gray-700/30 rounded">
+             <div className="bg-indigo-500/20 p-2 rounded-full mr-3">
+               <ShoppingBag className="h-5 w-5 text-indigo-400" />
+             </div>
+             <div>
+               <p className="text-gray-400 text-xs uppercase">Gefiltert</p>
+               <p className="text-lg font-semibold text-white">{filteredOrders?.length}</p>
+             </div>
+           </div>
+ 
+           <div className="flex items-center p-3 bg-gray-700/30 rounded">
+             <div className="bg-green-500/20 p-2 rounded-full mr-3">
+               <DollarSign className="h-5 w-5 text-green-400" />
+             </div>
+             <div>
+               <p className="text-gray-400 text-xs uppercase">Umsatz (Gefiltert)</p>
+               <p className="text-lg font-semibold text-white">{formatPrice(totalRevenue)}</p>
+             </div>
+           </div>
+ 
+           <div className="flex items-center p-3 bg-gray-700/30 rounded">
+             <div className="bg-blue-500/20 p-2 rounded-full mr-3">
+               <DollarSign className="h-5 w-5 text-blue-400" />
+             </div>
+             <div>
+               <p className="text-gray-400 text-xs uppercase">Durchschnitt</p>
+               <p className="text-lg font-semibold text-white">
+                 {formatPrice(filteredOrders?.length > 0 ? totalRevenue / filteredOrders?.length : 0)}
+               </p>
+             </div>
+           </div>
+         </div>
       </div>
 
       {/* Filters and Search */}
-      <div className="bg-fmv-carbon-darker p-4 rounded-lg shadow-md border border-fmv-carbon-light/20">
-        <div className="flex flex-col gap-4">
-          <div className="relative flex-grow">
+      <div className="bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-700">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+           {/* Search Input */}
+           <div className="relative md:col-span-2">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-gray-400" />
             </div>
             <input
               type="text"
-              placeholder="Bestellung oder Kunde suchen..."
+              placeholder="Suche nach ID, Name, E-Mail..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 w-full rounded-md bg-fmv-carbon-light/10 border border-fmv-carbon-light/30 text-fmv-silk focus:outline-none focus:ring-1 focus:ring-fmv-orange/50"
+              className="pl-10 pr-4 py-2 w-full rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
             />
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Filter className="h-5 w-5 text-gray-400" />
-              </div>
+          {/* Status Filter */}
+          <div className="relative">
               <select
                 value={statusFilter}
-                onChange={handleStatusChange}
-                className="pl-10 pr-4 py-2 w-full rounded-md bg-fmv-carbon-light/10 border border-fmv-carbon-light/30 text-fmv-silk focus:outline-none focus:ring-1 focus:ring-fmv-orange/50"
+                onChange={handleStatusChange} // Use updated handler
+                className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
               >
                 <option value="all">Alle Status</option>
-                <option value="in bearbeitung">In Bearbeitung</option>
-                <option value="abgeschlossen">Abgeschlossen</option>
+                <option value="pending">Ausstehend</option>
+                <option value="processing">In Bearbeitung</option>
+                <option value="completed">Abgeschlossen</option>
+                <option value="cancelled">Storniert</option>
               </select>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <ShoppingBag className="h-5 w-5 text-gray-400" />
+              <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                 <Filter className="h-4 w-4 text-gray-400" />
               </div>
-              <select
-                value={packageFilter}
-                onChange={e => setPackageFilter(e.target.value)}
-                className="pl-10 pr-4 py-2 w-full rounded-md bg-fmv-carbon-light/10 border border-fmv-carbon-light/30 text-fmv-silk focus:outline-none focus:ring-1 focus:ring-fmv-orange/50"
-              >
-                <option value="all">Alle Pakete</option>
-                <option value="spark">Spark</option>
-                <option value="flash">Flash</option>
-                <option value="ultra">Ultra</option>
-              </select>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Calendar className="h-5 w-5 text-gray-400" />
-              </div>
+          </div>
+          {/* Date Filter */}
+           <div className="relative">
               <select
                 value={dateFilter}
                 onChange={e => setDateFilter(e.target.value)}
-                className="pl-10 pr-4 py-2 w-full rounded-md bg-fmv-carbon-light/10 border border-fmv-carbon-light/30 text-fmv-silk focus:outline-none focus:ring-1 focus:ring-fmv-orange/50"
+                className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
               >
-                <option value="all">Alle Zeiträume</option>
+                <option value="all">Alle Daten</option>
                 <option value="today">Heute</option>
                 <option value="week">Letzte 7 Tage</option>
-                <option value="month">Letzter Monat</option>
+                <option value="month">Letzte 30 Tage</option>
               </select>
-            </div>
+               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                 <Calendar className="h-4 w-4 text-gray-400" />
+              </div>
           </div>
         </div>
       </div>
 
       {/* Orders Table */}
-      <div className="bg-fmv-carbon-darker rounded-lg shadow-md border border-fmv-carbon-light/30 overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-fmv-orange border-t-transparent"></div>
-            <p className="mt-4 text-fmv-silk/70">Bestellungen werden geladen...</p>
-          </div>
-        ) : filteredOrders.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-fmv-carbon-light/10">
+      <div className="bg-gray-800 rounded-lg shadow-sm border border-gray-700 overflow-hidden">
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-12 text-center text-gray-400">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-indigo-400 border-t-transparent mb-3"></div>
+              <p>Bestellungen werden geladen...</p>
+            </div>
+          ) : orders.length === 0 && !error ? (
+             <div className="p-10 text-center text-gray-500">
+                <ShoppingBag className="h-16 w-16 mx-auto mb-4 text-gray-600" />
+                <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Bestellungen</h3>
+                <p>Es wurden noch keine Bestellungen aufgegeben.</p>
+              </div>
+          ) : filteredOrders.length === 0 && orders.length > 0 ? (
+             <div className="p-10 text-center text-gray-500">
+                <Search className="h-12 w-12 mx-auto mb-4 text-gray-600" />
+                <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Treffer</h3>
+                <p>Keine Bestellungen entsprechen Ihren Filtern.</p>
+              </div>
+          ) : (
+            <table className="w-full min-w-[800px]"> {/* Increased min-width */}
+              <thead className="bg-gray-700/50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Bestell-ID
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Kunde
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    E-Mail
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Paket
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Datum
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Bilder
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Preis
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-fmv-silk/70 uppercase tracking-wider">
-                    Aktion
-                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Bestell-ID</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Kunde</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Datum</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Betrag</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-400 uppercase tracking-wider">Aktionen</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-fmv-carbon-light/10">
+              <tbody className="divide-y divide-gray-700">
                 {filteredOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-fmv-carbon-light/5">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-fmv-orange">
-                      {order.orderId}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk">
-                      {order.userName || order.userId.substring(0, 8) + '...'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk/80">
-                      {order.userEmail}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk">
-                      {order.type}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs rounded-full ${order.status === 'Abgeschlossen' || order.status === 'Fertig'
-                        ? 'bg-green-900/20 text-green-400'
-                        : 'bg-yellow-900/20 text-yellow-400'
-                        }`}>
-                        {order.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk/70">
-                      {order.date}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk">
-                      {order.imageCount}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-fmv-silk">
-                      {order.price}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <Link
-                        to={`/admin/orders/${order.id}`}
-                        className="text-fmv-orange hover:text-fmv-orange-light transition-colors inline-flex items-center"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Details
-                      </Link>
-                    </td>
+                  <tr key={order._id} className="hover:bg-gray-700/30 transition-colors">
+                     {/* Order ID */}
+                     <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-indigo-400">
+                         {order.orderId}
+                     </td>
+                     {/* Customer Info */}
+                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
+                         <div className="font-medium">{order.user.name}</div>
+                         <div className="text-xs text-gray-400">{order.user.email}</div>
+                     </td>
+                     {/* Status */}
+                     <td className="px-4 py-3 whitespace-nowrap">
+                       <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${getStatusClass(order.status)}`}>
+                         {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                       </span>
+                     </td>
+                     {/* Date */}
+                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{formatDate(order.createdAt)}</td>
+                     {/* Amount */}
+                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatPrice(order.totalAmount)}</td>
+                     {/* Actions */}
+                     <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
+                       <Link to={`/admin/bestellungen/${order.orderId}`} className="text-indigo-400 hover:text-indigo-300 p-1 rounded hover:bg-indigo-500/10" title="Details anzeigen">
+                         <Eye size={18} />
+                       </Link>
+                       {/* Add other actions like Edit Status, etc. */}
+                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        ) : (
-          <div className="p-8 text-center">
-            <div className="bg-fmv-carbon-light/5 inline-flex rounded-full p-4 mb-4">
-              <ShoppingBag size={24} className="text-fmv-silk/40" />
-            </div>
-            <h3 className="text-lg font-medium text-fmv-silk mb-2">Keine Bestellungen gefunden</h3>
-            <p className="text-fmv-silk/70 mb-4">
-              {searchTerm || statusFilter !== 'all'
-                ? 'Keine Bestellungen entsprechen Ihren Filterkriterien.'
-                : 'Es sind noch keine Bestellungen vorhanden.'}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Status Legend */}
-      <div className="bg-fmv-carbon-darker p-4 rounded-lg border border-fmv-carbon-light/20">
-        <h3 className="text-sm font-medium text-fmv-silk mb-3">Status-Legende:</h3>
-        <div className="flex flex-wrap gap-4">
-          <div className="flex items-center">
-            <span className="w-3 h-3 bg-yellow-400 rounded-full mr-2"></span>
-            <span className="text-sm text-fmv-silk/80">In Bearbeitung: Video muss noch hochgeladen werden</span>
-          </div>
-          <div className="flex items-center">
-            <span className="w-3 h-3 bg-green-400 rounded-full mr-2"></span>
-            <span className="text-sm text-fmv-silk/80">Abgeschlossen: Video wurde hochgeladen</span>
-          </div>
+          )}
         </div>
       </div>
     </div>
