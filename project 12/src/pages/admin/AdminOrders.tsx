@@ -58,20 +58,20 @@ interface AdminOrder {
 
 // Helper to format date
 const formatDate = (dateString: string | undefined): string => {
-    if (!dateString) return 'N/A';
-    try {
-        return new Date(dateString).toLocaleDateString('de-DE', {
-            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-        });
-    } catch (e) {
-        return 'Invalid Date';
-    }
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleDateString('de-DE', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+  } catch (e) {
+    return 'Invalid Date';
+  }
 }
 
 // Helper to format currency
 const formatPrice = (amount: number | undefined): string => {
-    if (amount === undefined || amount === null) return 'N/A';
-    return `CHF ${amount.toFixed(2)}`;
+  if (amount === undefined || amount === null) return 'N/A';
+  return `CHF ${amount.toFixed(2)}`;
 }
 
 // Helper to get status class
@@ -99,11 +99,11 @@ const AdminOrders: React.FC = () => {
     // Apply initial filter from URL if present
     const urlStatus = searchParams.get('status');
     if (urlStatus) {
-        // Map URL param values to backend status values if needed
-        const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
-        if (validStatuses.includes(urlStatus)) {
-             setStatusFilter(urlStatus);
-        }
+      // Map URL param values to backend status values if needed
+      const validStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+      if (validStatuses.includes(urlStatus)) {
+        setStatusFilter(urlStatus);
+      }
     }
 
     const fetchOrders = async () => {
@@ -115,7 +115,7 @@ const AdminOrders: React.FC = () => {
         // Add filtering params here if/when backend supports them
         // e.g., apiClient.get(`/orders?status=${statusFilter}&search=${searchTerm}`)
         const ordersData: AdminOrder[] = await apiClient.get('/dashboard/admin');
-        console.log({ordersData})
+        console.log({ ordersData })
         setOrders(ordersData);
 
       } catch (err: any) {
@@ -129,46 +129,46 @@ const AdminOrders: React.FC = () => {
 
     fetchOrders();
     // Re-fetch if URL filters change (though currently handled client-side)
-  }, [searchParams]); 
+  }, [searchParams]);
 
   // Client-side filtering logic
   const filteredOrders = useMemo(() => {
-      return orders?.recentOrders?.filter(order => {
-          const searchTermLower = searchTerm.toLowerCase();
-          const matchesSearch =
-            order.orderId.toLowerCase().includes(searchTermLower) ||
-            order.user.email.toLowerCase().includes(searchTermLower) ||
-            order.user.name.toLowerCase().includes(searchTermLower) ||
-            (order.packageType && order?.packageType.includes(searchTermLower));
+    return orders?.recentOrders?.filter(order => {
+      const searchTermLower = searchTerm.toLowerCase();
+      const matchesSearch =
+        order.orderId.toLowerCase().includes(searchTermLower) ||
+        order.user.email.toLowerCase().includes(searchTermLower) ||
+        order.user.name.toLowerCase().includes(searchTermLower) ||
+        (order.packageType && order?.packageType.includes(searchTermLower));
 
-          const matchesStatus =
-            statusFilter === 'all' ||
-            order.status.toLowerCase() === statusFilter.toLowerCase();
+      const matchesStatus =
+        statusFilter === 'all' ||
+        order.status.toLowerCase() === statusFilter.toLowerCase();
 
-          const matchesPackage =
-            packageFilter === 'all' ||
-            (order.packageType && order?.packageType === packageFilter.toLowerCase());
+      const matchesPackage =
+        packageFilter === 'all' ||
+        (order.packageType && order?.packageType === packageFilter.toLowerCase());
 
-          let matchesDate = true;
-          if (dateFilter !== 'all' && order.createdAt) {
-              const orderDate = new Date(order.createdAt);
-              const now = new Date();
-              let startDate = new Date();
+      let matchesDate = true;
+      if (dateFilter !== 'all' && order.createdAt) {
+        const orderDate = new Date(order.createdAt);
+        const now = new Date();
+        let startDate = new Date();
 
-              if (dateFilter === 'today') {
-                  startDate.setHours(0, 0, 0, 0);
-              } else if (dateFilter === 'week') {
-                  startDate.setDate(now.getDate() - 7);
-                  startDate.setHours(0, 0, 0, 0);
-              } else if (dateFilter === 'month') {
-                  startDate.setMonth(now.getMonth() - 1);
-                  startDate.setHours(0, 0, 0, 0);
-              }
-              matchesDate = orderDate >= startDate;
-          }
+        if (dateFilter === 'today') {
+          startDate.setHours(0, 0, 0, 0);
+        } else if (dateFilter === 'week') {
+          startDate.setDate(now.getDate() - 7);
+          startDate.setHours(0, 0, 0, 0);
+        } else if (dateFilter === 'month') {
+          startDate.setMonth(now.getMonth() - 1);
+          startDate.setHours(0, 0, 0, 0);
+        }
+        matchesDate = orderDate >= startDate;
+      }
 
-          return matchesSearch && matchesStatus && matchesPackage && matchesDate;
-      });
+      return matchesSearch && matchesStatus && matchesPackage && matchesDate;
+    });
   }, [orders, searchTerm, statusFilter, packageFilter, dateFilter]);
 
   // Handle status filter change and update URL
@@ -186,9 +186,9 @@ const AdminOrders: React.FC = () => {
 
   // Calculate total revenue from filtered orders
   const totalRevenue = useMemo(() => {
-      return filteredOrders?.reduce((sum, order) => {
-          return sum + (order.totalAmount || 0);
-      }, 0);
+    return filteredOrders?.reduce((sum, order) => {
+      return sum + (order.totalAmount || 0);
+    }, 0);
   }, [filteredOrders]);
 
   return (
@@ -212,44 +212,44 @@ const AdminOrders: React.FC = () => {
       <div className="bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-700 mb-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="flex items-center p-3 bg-gray-700/30 rounded">
-             <div className="bg-indigo-500/20 p-2 rounded-full mr-3">
-               <ShoppingBag className="h-5 w-5 text-indigo-400" />
-             </div>
-             <div>
-               <p className="text-gray-400 text-xs uppercase">Gefiltert</p>
-               <p className="text-lg font-semibold text-white">{filteredOrders?.length}</p>
-             </div>
-           </div>
- 
-           <div className="flex items-center p-3 bg-gray-700/30 rounded">
-             <div className="bg-green-500/20 p-2 rounded-full mr-3">
-               <DollarSign className="h-5 w-5 text-green-400" />
-             </div>
-             <div>
-               <p className="text-gray-400 text-xs uppercase">Umsatz (Gefiltert)</p>
-               <p className="text-lg font-semibold text-white">{formatPrice(totalRevenue)}</p>
-             </div>
-           </div>
- 
-           <div className="flex items-center p-3 bg-gray-700/30 rounded">
-             <div className="bg-blue-500/20 p-2 rounded-full mr-3">
-               <DollarSign className="h-5 w-5 text-blue-400" />
-             </div>
-             <div>
-               <p className="text-gray-400 text-xs uppercase">Durchschnitt</p>
-               <p className="text-lg font-semibold text-white">
-                 {formatPrice(filteredOrders?.length > 0 ? totalRevenue / filteredOrders?.length : 0)}
-               </p>
-             </div>
-           </div>
-         </div>
+            <div className="bg-indigo-500/20 p-2 rounded-full mr-3">
+              <ShoppingBag className="h-5 w-5 text-indigo-400" />
+            </div>
+            <div>
+              <p className="text-gray-400 text-xs uppercase">Gefiltert</p>
+              <p className="text-lg font-semibold text-white">{filteredOrders?.length}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center p-3 bg-gray-700/30 rounded">
+            <div className="bg-green-500/20 p-2 rounded-full mr-3">
+              <DollarSign className="h-5 w-5 text-green-400" />
+            </div>
+            <div>
+              <p className="text-gray-400 text-xs uppercase">Umsatz (Gefiltert)</p>
+              <p className="text-lg font-semibold text-white">{formatPrice(totalRevenue)}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center p-3 bg-gray-700/30 rounded">
+            <div className="bg-blue-500/20 p-2 rounded-full mr-3">
+              <DollarSign className="h-5 w-5 text-blue-400" />
+            </div>
+            <div>
+              <p className="text-gray-400 text-xs uppercase">Durchschnitt</p>
+              <p className="text-lg font-semibold text-white">
+                {formatPrice(filteredOrders?.length > 0 ? totalRevenue / filteredOrders?.length : 0)}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Filters and Search */}
       <div className="bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-700">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-           {/* Search Input */}
-           <div className="relative md:col-span-2">
+          {/* Search Input */}
+          <div className="relative md:col-span-2">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-gray-400" />
             </div>
@@ -263,36 +263,36 @@ const AdminOrders: React.FC = () => {
           </div>
           {/* Status Filter */}
           <div className="relative">
-              <select
-                value={statusFilter}
-                onChange={handleStatusChange} // Use updated handler
-                className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-              >
-                <option value="all">Alle Status</option>
-                <option value="pending">Ausstehend</option>
-                <option value="processing">In Bearbeitung</option>
-                <option value="completed">Abgeschlossen</option>
-                <option value="cancelled">Storniert</option>
-              </select>
-              <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                 <Filter className="h-4 w-4 text-gray-400" />
-              </div>
+            <select
+              value={statusFilter}
+              onChange={handleStatusChange} // Use updated handler
+              className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            >
+              <option value="all">Alle Status</option>
+              <option value="pending">Ausstehend</option>
+              <option value="processing">In Bearbeitung</option>
+              <option value="completed">Abgeschlossen</option>
+              <option value="cancelled">Storniert</option>
+            </select>
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+              <Filter className="h-4 w-4 text-gray-400" />
+            </div>
           </div>
           {/* Date Filter */}
-           <div className="relative">
-              <select
-                value={dateFilter}
-                onChange={e => setDateFilter(e.target.value)}
-                className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-              >
-                <option value="all">Alle Daten</option>
-                <option value="today">Heute</option>
-                <option value="week">Letzte 7 Tage</option>
-                <option value="month">Letzte 30 Tage</option>
-              </select>
-               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                 <Calendar className="h-4 w-4 text-gray-400" />
-              </div>
+          <div className="relative">
+            <select
+              value={dateFilter}
+              onChange={e => setDateFilter(e.target.value)}
+              className="pl-4 pr-8 py-2 w-full appearance-none rounded-md bg-gray-700/50 border border-gray-600 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+            >
+              <option value="all">Alle Daten</option>
+              <option value="today">Heute</option>
+              <option value="week">Letzte 7 Tage</option>
+              <option value="month">Letzte 30 Tage</option>
+            </select>
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+              <Calendar className="h-4 w-4 text-gray-400" />
+            </div>
           </div>
         </div>
       </div>
@@ -306,17 +306,17 @@ const AdminOrders: React.FC = () => {
               <p>Bestellungen werden geladen...</p>
             </div>
           ) : orders.length === 0 && !error ? (
-             <div className="p-10 text-center text-gray-500">
-                <ShoppingBag className="h-16 w-16 mx-auto mb-4 text-gray-600" />
-                <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Bestellungen</h3>
-                <p>Es wurden noch keine Bestellungen aufgegeben.</p>
-              </div>
+            <div className="p-10 text-center text-gray-500">
+              <ShoppingBag className="h-16 w-16 mx-auto mb-4 text-gray-600" />
+              <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Bestellungen</h3>
+              <p>Es wurden noch keine Bestellungen aufgegeben.</p>
+            </div>
           ) : filteredOrders.length === 0 && orders.length > 0 ? (
-             <div className="p-10 text-center text-gray-500">
-                <Search className="h-12 w-12 mx-auto mb-4 text-gray-600" />
-                <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Treffer</h3>
-                <p>Keine Bestellungen entsprechen Ihren Filtern.</p>
-              </div>
+            <div className="p-10 text-center text-gray-500">
+              <Search className="h-12 w-12 mx-auto mb-4 text-gray-600" />
+              <h3 className="text-xl font-semibold text-gray-400 mb-2">Keine Treffer</h3>
+              <p>Keine Bestellungen entsprechen Ihren Filtern.</p>
+            </div>
           ) : (
             <table className="w-full min-w-[800px]"> {/* Increased min-width */}
               <thead className="bg-gray-700/50">
@@ -332,32 +332,39 @@ const AdminOrders: React.FC = () => {
               <tbody className="divide-y divide-gray-700">
                 {filteredOrders.map((order) => (
                   <tr key={order._id} className="hover:bg-gray-700/30 transition-colors">
-                     {/* Order ID */}
-                     <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-indigo-400">
-                         {order.orderId}
-                     </td>
-                     {/* Customer Info */}
-                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
-                         <div className="font-medium">{order.user.name}</div>
-                         <div className="text-xs text-gray-400">{order.user.email}</div>
-                     </td>
-                     {/* Status */}
-                     <td className="px-4 py-3 whitespace-nowrap">
-                       <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${getStatusClass(order.status)}`}>
-                         {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                       </span>
-                     </td>
-                     {/* Date */}
-                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{formatDate(order.createdAt)}</td>
-                     {/* Amount */}
-                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatPrice(order.totalAmount)}</td>
-                     {/* Actions */}
-                     <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
-                       <Link to={`/admin/bestellungen/${order.orderId}`} className="text-indigo-400 hover:text-indigo-300 p-1 rounded hover:bg-indigo-500/10" title="Details anzeigen">
-                         <Eye size={18} />
-                       </Link>
-                       {/* Add other actions like Edit Status, etc. */}
-                     </td>
+                    {/* Order ID */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-indigo-400">
+                      {order.orderId}
+                    </td>
+                    {/* Customer Info */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
+                      <div className="font-medium">{order.user.name}</div>
+                      <div className="text-xs text-gray-400">{order.user.email}</div>
+                    </td>
+                    {/* Status */}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`inline-block px-2 py-0.5 text-xs font-semibold rounded-full ${getStatusClass(order.status)}`}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </span>
+                    </td>
+                    {/* Date */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-400">{formatDate(order.createdAt)}</td>
+                    {/* Amount */}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">{formatPrice(order.totalAmount)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
+                      <img
+                        src={`data:image/jpeg;base64,${order.uploadedImages[0].data}`}
+                        alt="Uploaded"
+                        className="h-16 w-16 object-cover rounded"
+                      />
+                    </td>
+                    {/* Actions */}
+                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm font-medium">
+                      <Link to={`/admin/bestellungen/${order.orderId}`} className="text-indigo-400 hover:text-indigo-300 p-1 rounded hover:bg-indigo-500/10" title="Details anzeigen">
+                        <Eye size={18} />
+                      </Link>
+                      {/* Add other actions like Edit Status, etc. */}
+                    </td>
                   </tr>
                 ))}
               </tbody>

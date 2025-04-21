@@ -67,7 +67,7 @@ const getAdminDashboardData = asyncHandler(async (req, res) => {
   // --- Recent Orders ---
   const recentOrdersPromise = Order.find()
     .sort({ createdAt: -1 })
-    .select("-uploadedImages")
+    // .select("-uploadedImages")
     .limit(10) // Get latest 10 orders
     .populate('user', 'name email'); // Populate user details
 

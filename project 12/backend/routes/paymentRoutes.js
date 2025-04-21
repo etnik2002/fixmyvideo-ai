@@ -2,20 +2,17 @@ import express from 'express';
 import Stripe from 'stripe';
 import asyncHandler from 'express-async-handler';
 import { protect } from '../middleware/authMiddleware.js';
-import Order from '../models/Order.js'; // Assuming Order model stores payment details
+import Order from '../models/Order.js';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '../.env' });
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173'; // Default to common Vite dev port
+const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
 
-// @desc    Create Stripe Checkout Session
-// @route   POST /api/payments/create-checkout-session
-// @access  Private
 router.post('/create-checkout-session', protect, asyncHandler(async (req, res) => {
-    const { orderId, amount, currency = 'usd', description = 'Video Fix Service' } = req.body; // Expect orderId, amount
+    const { orderId, amount, currency = 'usd', description = 'Video Fix Service' } = req.body;
     const userId = req.user._id;
 
     if (!orderId || !amount) {
@@ -23,7 +20,6 @@ router.post('/create-checkout-session', protect, asyncHandler(async (req, res) =
         throw new Error('Missing orderId or amount for payment session');
     }
 
-    // You might want to validate the amount against the actual order details from your DB
     // const order = await Order.findById(orderId);
     // if (!order || order.user.toString() !== userId.toString() || order.totalAmount !== amount) {
     //     res.status(400);
@@ -79,7 +75,7 @@ router.get('/verify-payment/:sessionId', protect, asyncHandler(async (req, res) 
         //     throw new Error('Session does not belong to this user');
         // }
 
-        console.log({ajdindallenajdini: req.query.orderId})
+        console.log({ ajdindallenajdini: req.query.orderId })
         if (session.payment_status === 'paid') {
             const order = await Order.findOneAndUpdate(
                 { orderId: req.query.orderId },
